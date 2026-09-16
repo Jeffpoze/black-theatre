@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="black_theatre_tv"
+        android:label="Black Theatre"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
