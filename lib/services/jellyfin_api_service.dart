@@ -118,21 +118,13 @@ class JellyfinApiService {
       'api_key': token,
       'MediaSourceId': itemId,
       'PlaySessionId': ?playSessionId,
-      if (maxBitrateBps != null) ...{
-        // A capped-bitrate request always needs an actual re-encode to hit
-        // that target, so pin it to one codec pair every device decodes.
-        'VideoCodec': 'h264',
-        'AudioCodec': 'aac',
-        'VideoBitrate': '$maxBitrateBps',
-      } else ...{
-        // For "Original" quality, list every codec the player can actually
-        // decode instead of forcing h264/aac. Jellyfin remuxes (no re-encode)
-        // when the source already matches one of these, and only transcodes
-        // when it truly doesn't — this is the documented way clients avoid
-        // forcing a transcode Jellyfin's own logic didn't need to do.
-        'VideoCodec': 'h264,hevc,vp9,av1,mpeg4,mpeg2video,vc1,vp8',
-        'AudioCodec': 'aac,ac3,eac3,mp3,flac,opus,vorbis,dts,truehd,pcm_s16le,alac',
-      },
+      // Two attempts at avoiding a forced transcode for "Original" quality
+      // (omitting the codec params, then a broad codec list) both broke
+      // playback outright against this server. Back to the one known-working
+      // request shape until that's researched properly instead of guessed.
+      'VideoCodec': 'h264',
+      'AudioCodec': 'aac',
+      if (maxBitrateBps != null) 'VideoBitrate': '$maxBitrateBps',
       if (subtitleStreamIndex != null) ...{
         'SubtitleStreamIndex': '$subtitleStreamIndex',
         'SubtitleMethod': subtitleMethod ?? 'Hls',
