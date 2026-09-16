@@ -294,6 +294,62 @@ class JellyfinApiService {
     return ('$cleanUrl/Videos/$itemId/stream?$query', playSessionId);
   }
 
+  // We were only ever reporting Stopped, never Playing or Playing/Progress.
+  // No real Jellyfin client does that — the session/transcode job has no
+  // signal that a client is still actively watching, which server logs
+  // showed leading to its own idle "kill timer" tearing down the transcode
+  // mid-playback (surfacing to us as a fatal read timeout).
+  Future<void> reportPlaybackStart(
+    String serverUrl,
+    String token,
+    String itemId,
+    String playSessionId,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Sessions/Playing');
+    try {
+      await _client.post(
+        uri,
+        headers: {...authHeaders(token), 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'ItemId': itemId,
+          'PlaySessionId': playSessionId,
+          'CanSeek': true,
+        }),
+      );
+    } catch (e) {
+      print('reportPlaybackStart failed for $itemId: $e');
+    }
+  }
+
+  Future<void> reportPlaybackProgress(
+    String serverUrl,
+    String token,
+    String itemId,
+    String playSessionId,
+    Duration position, {
+    required bool isPaused,
+  }) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Sessions/Playing/Progress');
+    try {
+      await _client.post(
+        uri,
+        headers: {...authHeaders(token), 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'ItemId': itemId,
+          'PlaySessionId': playSessionId,
+          'PositionTicks': position.inMicroseconds * 10,
+          'IsPaused': isPaused,
+          'CanSeek': true,
+          'EventName': 'timeupdate',
+        }),
+      );
+    } catch (e) {
+      print('reportPlaybackProgress failed for $itemId: $e');
+    }
+  }
+
   // Jellyfin only tears down a transcode session's ffmpeg process once it's
   // told playback stopped (or the session times out on its own, which can
   // take minutes and pile up under repeated testing). Report it explicitly

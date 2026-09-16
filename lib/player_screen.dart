@@ -77,6 +77,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<bool>? _completedSub;
   Duration _lastKnownPosition = Duration.zero;
   String _playSessionId = '${DateTime.now().microsecondsSinceEpoch}';
+  Timer? _progressTimer;
 
   @override
   void initState() {
@@ -105,6 +106,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _completedSub = _player.stream.completed.listen((completed) {
       if (completed && widget.onNext != null) widget.onNext!();
     });
+    if (!widget.isAudioOnly) {
+      // Jellyfin's transcode has its own idle "kill timer" that tears down
+      // the ffmpeg process if it stops hearing from the client — server logs
+      // showed exactly this happening mid-playback, since we never sent any
+      // keep-alive. Ping roughly every 10s while a stream is open.
+      _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (_error == null) {
+          _api.reportPlaybackProgress(widget.serverUrl, widget.token, widget.itemId, _playSessionId, _player.state.position, isPaused: !_player.state.playing);
+        }
+      });
+    }
     _loadStreamsAndPlay();
     _scheduleHide();
   }
@@ -139,6 +151,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _playSessionId = playSessionId;
           _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
           if (_speed != 1.0) _player.setRate(_speed);
+          _api.reportPlaybackStart(widget.serverUrl, widget.token, widget.itemId, _playSessionId);
           return;
         }
       } catch (e) {
@@ -157,6 +170,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
     _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
     if (_speed != 1.0) _player.setRate(_speed);
+    _api.reportPlaybackStart(widget.serverUrl, widget.token, widget.itemId, _playSessionId);
   }
 
   String? _subtitleCodec(int index) {
@@ -331,6 +345,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _hideTimer?.cancel();
     _completedSub?.cancel();
+    _progressTimer?.cancel();
     if (!widget.isAudioOnly) {
       _api.reportPlaybackStopped(widget.serverUrl, widget.token, widget.itemId, _playSessionId, _player.state.position);
     }
