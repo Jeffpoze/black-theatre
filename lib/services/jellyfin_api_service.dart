@@ -195,6 +195,28 @@ class JellyfinApiService {
         for (final format in ['dvbsub', 'dvdsub', 'pgssub'])
           {'Format': format, 'Method': 'Encode'},
       ],
+      // Without this, Jellyfin has no idea whether the player can handle
+      // Dolby Vision / HDR variants of hevc/av1/vp9 and may pick a
+      // combination the player can't actually decode. media_kit (ffmpeg) can
+      // decode a Dolby Vision stream's backwards-compatible base layer, so
+      // declare support for it alongside plain HDR10/HLG/SDR.
+      'CodecProfiles': [
+        for (final codec in ['hevc', 'av1', 'vp9'])
+          {
+            'Codec': codec,
+            'Type': 'Video',
+            'Conditions': [
+              {'Condition': 'NotEquals', 'IsRequired': false, 'Property': 'IsAnamorphic', 'Value': 'true'},
+              {'Condition': 'NotEquals', 'IsRequired': false, 'Property': 'IsInterlaced', 'Value': 'true'},
+              {
+                'Condition': 'EqualsAny',
+                'IsRequired': true,
+                'Property': 'VideoRangeType',
+                'Value': 'SDR|HDR10|HDR10Plus|HLG|DOVI|DOVIWithSDR|DOVIWithHDR10|DOVIWithHDR10Plus|DOVIWithHLG|DOVIWithEL|DOVIWithELHDR10Plus',
+              },
+            ],
+          },
+      ],
     };
     final body = {
       'UserId': userId,
