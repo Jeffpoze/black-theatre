@@ -38,6 +38,7 @@ class PlayerScreen extends StatefulWidget {
     this.startPosition = Duration.zero,
     this.subtitle,
     this.onNext,
+    this.isAudioOnly = false,
   });
   final String title;
   final String? subtitle;
@@ -47,6 +48,7 @@ class PlayerScreen extends StatefulWidget {
   final String itemId;
   final Duration startPosition;
   final VoidCallback? onNext;
+  final bool isAudioOnly;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -95,22 +97,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _loadStreamsAndPlay() async {
-    try {
-      final streams = await _api.getMediaStreams(widget.serverUrl, widget.userId, widget.token, widget.itemId);
-      if (mounted) setState(() => _jellyfinStreams = streams);
-    } catch (_) {}
+    if (!widget.isAudioOnly) {
+      try {
+        final streams = await _api.getMediaStreams(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+        if (mounted) setState(() => _jellyfinStreams = streams);
+      } catch (_) {}
+    }
     _openStream(position: widget.startPosition);
   }
 
   void _openStream({required Duration position}) {
-    final url = JellyfinApiService.getStreamUrl(
-      widget.serverUrl,
-      widget.itemId,
-      widget.token,
-      maxBitrateBps: _quality.maxBitrateBps,
-      subtitleStreamIndex: _subtitleStreamIndex,
-      subtitleMethod: _subtitleStreamIndex == null ? null : JellyfinApiService.subtitleMethodFor(_subtitleCodec(_subtitleStreamIndex!)),
-    );
+    final url = widget.isAudioOnly
+        ? JellyfinApiService.getAudioStreamUrl(widget.serverUrl, widget.itemId, widget.userId, widget.token, maxBitrateBps: _quality.maxBitrateBps)
+        : JellyfinApiService.getStreamUrl(
+            widget.serverUrl,
+            widget.itemId,
+            widget.token,
+            maxBitrateBps: _quality.maxBitrateBps,
+            subtitleStreamIndex: _subtitleStreamIndex,
+            subtitleMethod: _subtitleStreamIndex == null ? null : JellyfinApiService.subtitleMethodFor(_subtitleCodec(_subtitleStreamIndex!)),
+          );
     _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
     if (_speed != 1.0) _player.setRate(_speed);
   }

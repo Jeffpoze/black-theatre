@@ -105,9 +105,9 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  void _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false}) {
+  void _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false, bool isAudioOnly = false}) {
     final route = MaterialPageRoute<void>(
-      builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext),
+      builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext, isAudioOnly: isAudioOnly),
     );
     if (replace) {
       Navigator.of(context).pushReplacement(route);
@@ -146,7 +146,8 @@ class _DetailScreenState extends State<DetailScreen> {
       return;
     }
     final ticks = (item['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'];
-    _play(widget.itemId, name, startPosition: ticksToDuration(ticks));
+    final isAudioOnly = item['Type'] == 'Audio' || item['Type'] == 'AudioBook';
+    _play(widget.itemId, name, startPosition: ticksToDuration(ticks), isAudioOnly: isAudioOnly);
   }
 
   bool get _hasResumablePlay {

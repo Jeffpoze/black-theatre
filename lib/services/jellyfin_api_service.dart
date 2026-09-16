@@ -39,7 +39,8 @@ class JellyfinApiService {
 
   final http.Client _client;
 
-  static const _clientIdentity = 'Client="BlackTheatre", Device="iOS", DeviceId="c78432a9-816f-45b6-b510-123456789abc", Version="1.0.0"';
+  static const _deviceId = 'c78432a9-816f-45b6-b510-123456789abc';
+  static const _clientIdentity = 'Client="BlackTheatre", Device="iOS", DeviceId="$_deviceId", Version="1.0.0"';
 
   static String getImageUrl(String serverUrl, String itemId, {String? imageTag}) {
     final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
@@ -74,6 +75,24 @@ class JellyfinApiService {
     };
     final query = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
     return '$cleanUrl/Videos/$itemId/master.m3u8?$query';
+  }
+
+  // Audio-only items (audiobooks, music) don't have a video stream, so the
+  // /Videos master.m3u8 endpoint isn't reliable for them; Jellyfin's audio
+  // endpoint is built for exactly this.
+  static String getAudioStreamUrl(String serverUrl, String itemId, String userId, String token, {int? maxBitrateBps}) {
+    final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
+    final params = <String, String>{
+      'api_key': token,
+      'UserId': userId,
+      'DeviceId': _deviceId,
+      'Container': 'opus,mp3,aac,m4a,m4b,flac,wav,ogg,wma',
+      'AudioCodec': 'aac',
+      'TranscodingContainer': 'ts',
+      if (maxBitrateBps != null) 'MaxStreamingBitrate': '$maxBitrateBps',
+    };
+    final query = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+    return '$cleanUrl/Audio/$itemId/universal?$query';
   }
 
   static Map<String, String> authHeaders(String token) {
@@ -263,7 +282,10 @@ class JellyfinApiService {
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(queryParameters: {
       'Recursive': 'true',
       'IncludeItemTypes': 'Movie,Episode',
-      'Filters': 'IsUnaired',
+      // Jellyfin's IsUnaired filter depends on the item having been flagged
+      // that way at scan time, which misses plenty of genuinely upcoming
+      // items; MinPremiereDate alone is a more reliable "is this in the
+      // future" check.
       'MinPremiereDate': minPremiereDate,
       'SortBy': 'PremiereDate',
       'SortOrder': 'Ascending',
