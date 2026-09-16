@@ -69,18 +69,42 @@ class JellyfinApiService {
 
   static String subtitleMethodFor(String? codec) => codec != null && _textSubtitleCodecs.contains(codec.toLowerCase()) ? 'Hls' : 'Encode';
 
-  static String getStreamUrl(String serverUrl, String itemId, String token, {int? maxBitrateBps, int? subtitleStreamIndex, String? subtitleMethod}) {
+  static String getStreamUrl(String serverUrl, String itemId, String token, {int? maxBitrateBps, int? subtitleStreamIndex, String? subtitleMethod, String? playSessionId}) {
     final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
     final params = <String, String>{
       'api_key': token,
       'MediaSourceId': itemId,
       'VideoCodec': 'h264',
       'AudioCodec': 'aac',
+      if (playSessionId != null) 'PlaySessionId': playSessionId,
       if (maxBitrateBps != null) 'VideoBitrate': '$maxBitrateBps',
       if (subtitleStreamIndex != null) ...{'SubtitleStreamIndex': '$subtitleStreamIndex', 'SubtitleMethod': subtitleMethod ?? 'Hls'},
     };
     final query = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
     return '$cleanUrl/Videos/$itemId/master.m3u8?$query';
+  }
+
+  // Jellyfin only tears down a transcode session's ffmpeg process once it's
+  // told playback stopped (or the session times out on its own, which can
+  // take minutes and pile up under repeated testing). Report it explicitly
+  // whenever the player closes so the server isn't left transcoding for
+  // nothing.
+  Future<void> reportPlaybackStopped(String serverUrl, String token, String itemId, String playSessionId, Duration position) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Sessions/Playing/Stopped');
+    try {
+      await _client.post(
+        uri,
+        headers: {...authHeaders(token), 'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'ItemId': itemId,
+          'PlaySessionId': playSessionId,
+          'PositionTicks': position.inMicroseconds * 10,
+        }),
+      );
+    } catch (e) {
+      print('reportPlaybackStopped failed for $itemId: $e');
+    }
   }
 
   // Audio-only items (audiobooks, music) don't have a video stream, so the
