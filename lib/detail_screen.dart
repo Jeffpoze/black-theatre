@@ -228,6 +228,12 @@ class _DetailScreenState extends State<DetailScreen> {
     if (selected != null && selected != _selectedSeasonId) _selectSeason(selected);
   }
 
+  void _showUnavailable(String feature) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$feature is coming soon.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -280,9 +286,34 @@ class _DetailScreenState extends State<DetailScreen> {
           CustomScrollView(
             slivers: [
               SliverAppBar(
-                expandedHeight: 320,
+                expandedHeight: 460,
                 pinned: true,
+                automaticallyImplyLeading: false,
                 backgroundColor: const Color(0xFF090A0C).withValues(alpha: .85),
+                leading: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                actions: [
+                  Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: IconButton(
+                      onPressed: () => _showUnavailable('Cast'),
+                      icon: const Icon(Icons.cast_outlined),
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black54,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
                 flexibleSpace: FlexibleSpaceBar(
                   background: backdropUrl == null
                       ? const ColoredBox(color: Color(0xFF181A1E))
@@ -293,24 +324,48 @@ class _DetailScreenState extends State<DetailScreen> {
                             const DecoratedBox(
                               decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF090A0C)])),
                             ),
-                            if (logoUrl != null)
-                              Positioned(
-                                left: 20,
-                                right: 20,
-                                bottom: 20,
-                                child: Align(
-                                  alignment: Alignment.bottomLeft,
-                                  child: CachedNetworkImage(
-                                    imageUrl: logoUrl,
-                                    httpHeaders: JellyfinApiService.authHeaders(widget.token),
-                                    memCacheWidth: 800,
-                                    fit: BoxFit.contain,
-                                    alignment: Alignment.bottomLeft,
-                                    height: 90,
-                                    errorWidget: (_, _, _) => const SizedBox.shrink(),
-                                  ),
-                                ),
+                            Positioned(
+                              left: 24,
+                              right: 24,
+                              bottom: 26,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (logoUrl != null)
+                                    CachedNetworkImage(
+                                      imageUrl: logoUrl,
+                                      httpHeaders: JellyfinApiService.authHeaders(widget.token),
+                                      memCacheWidth: 800,
+                                      fit: BoxFit.contain,
+                                      height: 94,
+                                      errorWidget: (_, _, _) => const SizedBox.shrink(),
+                                    )
+                                  else
+                                    Text(
+                                      name,
+                                      maxLines: 2,
+                                      textAlign: TextAlign.center,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 30,
+                                        fontWeight: FontWeight.w800,
+                                        shadows: [Shadow(blurRadius: 12)],
+                                      ),
+                                    ),
+                                  if (isSeries && _nextUp != null) ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      _asString(_nextUp!['Name']) ?? 'Next episode',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
+                            ),
                           ],
                         ),
                 ),
@@ -321,9 +376,7 @@ class _DetailScreenState extends State<DetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // The title is already shown via the logo image above when
-                  // one exists, so it isn't repeated here.
-                  if (logoUrl == null) ...[
+                  if (backdropUrl == null && logoUrl == null) ...[
                     Text(name, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                   ],
@@ -350,10 +403,16 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
                     const SizedBox(height: 16),
                   ],
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-                    _ActionButton(icon: _isFavorite ? Icons.bookmark : Icons.bookmark_border, label: 'Watchlist', active: _isFavorite, onTap: _toggleFavorite),
-                    _ActionButton(icon: _isWatched ? Icons.check_circle : Icons.check_circle_outline, label: 'Watched', active: _isWatched, onTap: _toggleWatched),
-                  ]),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _ActionButton(icon: _isFavorite ? Icons.bookmark : Icons.bookmark_border, label: 'Watchlist', active: _isFavorite, onTap: _toggleFavorite),
+                      _ActionButton(icon: Icons.star_border_rounded, label: 'Rate', active: false, onTap: () => _showUnavailable('Ratings')),
+                      _ActionButton(icon: _isWatched ? Icons.check_circle : Icons.check_circle_outline, label: 'Watched', active: _isWatched, onTap: _toggleWatched),
+                      _ActionButton(icon: Icons.download_outlined, label: 'Download', active: false, onTap: () => _showUnavailable('Downloads')),
+                      _ActionButton(icon: Icons.more_vert, label: 'More', active: false, onTap: () => _showUnavailable('More actions')),
+                    ],
+                  ),
                   if (overview != null) ...[const SizedBox(height: 20), Text(overview, style: const TextStyle(height: 1.4))],
                   if (directors.isNotEmpty) ...[const SizedBox(height: 12), Text('Directed by $directors', style: const TextStyle(color: Color(0xFFA5A7AC)))],
                   if (genres != null && genres.isNotEmpty) ...[const SizedBox(height: 16), _LabelValue(label: 'Genres', value: genres)],
