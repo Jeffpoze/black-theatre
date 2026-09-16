@@ -76,15 +76,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _player = Player();
     _controller = VideoController(_player);
-    final platform = _player.platform;
-    if (platform is NativePlayer) {
-      // Seeking on a transcoded HLS stream makes Jellyfin restart the encode
-      // at the new position, which can briefly stall the read and otherwise
-      // surface as a fatal "tcp: ffurl_read returned ETIMEDOUT" error. Let
-      // ffmpeg retry the connection instead of failing immediately.
-      platform.setProperty('network-timeout', '20');
-      platform.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,reconnect_delay_max=5');
-    }
     _player.stream.error.listen((error) {
       _lastKnownPosition = _player.state.position;
       if (mounted) setState(() => _error = error);
