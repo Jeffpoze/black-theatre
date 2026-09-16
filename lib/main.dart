@@ -81,6 +81,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
   final _api = JellyfinApiService();
   bool _isLoading = false;
   bool _rememberMe = true;
+  bool _obscurePassword = true;
   String? _error;
 
   Future<void> _signIn() async {
@@ -126,7 +127,17 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
                 const SizedBox(height: 14),
                 TextField(controller: _usernameController, decoration: const InputDecoration(labelText: 'Username')),
                 const SizedBox(height: 14),
-                TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, color: const Color(0xFFA5A7AC)),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 4),
                 CheckboxListTile(
                   value: _rememberMe,
