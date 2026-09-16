@@ -67,7 +67,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _controlsVisible = true;
   Timer? _hideTimer;
   StreamSubscription<bool>? _completedSub;
+  StreamSubscription<bool>? _playingSub;
   Duration _lastKnownPosition = Duration.zero;
+  int _autoRetryAttempts = 0;
 
   @override
   void initState() {
@@ -78,7 +80,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller = VideoController(_player);
     _player.stream.error.listen((error) {
       _lastKnownPosition = _player.state.position;
+      // Seeking on a transcoded stream makes Jellyfin restart the encode at
+      // the new position, which can briefly stall the read and surface as a
+      // fatal ffmpeg TCP timeout. Retry a couple of times before giving up
+      // and showing the error screen.
+      if (_autoRetryAttempts < 2) {
+        _autoRetryAttempts++;
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted && _error == null) _openStream(position: _lastKnownPosition);
+        });
+        return;
+      }
       if (mounted) setState(() => _error = error);
+    });
+    _playingSub = _player.stream.playing.listen((playing) {
+      if (playing) _autoRetryAttempts = 0;
     });
     _completedSub = _player.stream.completed.listen((completed) {
       if (completed && widget.onNext != null) widget.onNext!();
@@ -206,6 +222,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _retry() {
+    _autoRetryAttempts = 0;
     setState(() => _error = null);
     _openStream(position: _lastKnownPosition);
   }
@@ -284,6 +301,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _hideTimer?.cancel();
     _completedSub?.cancel();
+    _playingSub?.cancel();
     _player.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);

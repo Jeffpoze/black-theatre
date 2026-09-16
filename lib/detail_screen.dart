@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 
 import 'player_screen.dart';
@@ -23,6 +24,7 @@ class _DetailScreenState extends State<DetailScreen> {
   String? _selectedSeasonId;
   List<dynamic> _seasonEpisodes = const [];
   bool _isLoadingEpisodes = false;
+  List<dynamic> _tracks = const [];
   bool _isLoading = true;
   String? _error;
   bool _favoriteBusy = false;
@@ -39,6 +41,7 @@ class _DetailScreenState extends State<DetailScreen> {
       final item = await _api.getItemDetail(widget.serverUrl, widget.userId, widget.token, widget.itemId);
       List<dynamic> seasons = const [];
       Map<String, dynamic>? nextUp;
+      List<dynamic> tracks = const [];
       if (item['Type'] == 'Series') {
         final results = await Future.wait([
           _api.getSeasons(widget.serverUrl, widget.userId, widget.token, widget.itemId),
@@ -46,12 +49,18 @@ class _DetailScreenState extends State<DetailScreen> {
         ]);
         seasons = results[0] as List<dynamic>;
         nextUp = results[1] as Map<String, dynamic>?;
+      } else if (item['IsFolder'] == true) {
+        // A playable folder that isn't a Series (music album, audiobook
+        // folder, playlist, box set): its children are what's actually
+        // playable, not the folder itself.
+        tracks = await _api.getChildItems(widget.serverUrl, widget.userId, widget.token, widget.itemId);
       }
       if (!mounted) return;
       setState(() {
         _item = item;
         _seasons = seasons;
         _nextUp = nextUp;
+        _tracks = tracks;
         _isLoading = false;
       });
       final defaultSeasonId = (nextUp?['SeasonId'] as String?) ?? seasons.whereType<Map<String, dynamic>>().firstOrNull?['Id'] as String?;
@@ -131,6 +140,20 @@ class _DetailScreenState extends State<DetailScreen> {
     _play(itemId, seriesName, subtitle: subtitle, startPosition: ticksToDuration(ticks), replace: replace, onNext: next == null ? null : () => _playEpisode(next, replace: true));
   }
 
+  void _playTrack(Map<String, dynamic> track) {
+    final itemId = track['Id'] as String?;
+    if (itemId == null) return;
+    final title = (track['Name'] as String?) ?? 'Track';
+    final ticks = (track['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'];
+    final isAudioOnly = track['Type'] == 'Audio' || track['Type'] == 'AudioBook';
+    _play(itemId, title, startPosition: ticksToDuration(ticks), isAudioOnly: isAudioOnly);
+  }
+
+  Map<String, dynamic>? get _firstPlayableTrack {
+    final tracks = _tracks.whereType<Map<String, dynamic>>().toList();
+    return tracks.firstWhereOrNull((t) => (t['UserData'] as Map<String, dynamic>?)?['Played'] != true) ?? tracks.firstOrNull;
+  }
+
   void _playMain() {
     final item = _item;
     if (item == null) return;
@@ -145,6 +168,11 @@ class _DetailScreenState extends State<DetailScreen> {
       if (firstEpisode != null) _playEpisode(firstEpisode);
       return;
     }
+    if (item['IsFolder'] == true) {
+      final track = _firstPlayableTrack;
+      if (track != null) _playTrack(track);
+      return;
+    }
     final ticks = (item['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'];
     final isAudioOnly = item['Type'] == 'Audio' || item['Type'] == 'AudioBook';
     _play(widget.itemId, name, startPosition: ticksToDuration(ticks), isAudioOnly: isAudioOnly);
@@ -154,6 +182,7 @@ class _DetailScreenState extends State<DetailScreen> {
     final item = _item;
     if (item == null) return false;
     if (item['Type'] == 'Series') return _nextUp != null && ((_nextUp!['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'] ?? 0) > 0;
+    if (item['IsFolder'] == true) return ((_firstPlayableTrack?['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'] ?? 0) > 0;
     return ((item['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'] ?? 0) > 0;
   }
 
@@ -196,7 +225,8 @@ class _DetailScreenState extends State<DetailScreen> {
     final backdropTag = (item['BackdropImageTags'] as List<dynamic>?)?.whereType<String>().firstOrNull;
     final backdropUrl = backdropTag != null ? JellyfinApiService.getBackdropUrl(widget.serverUrl, widget.itemId, imageTag: backdropTag) : null;
     final isSeries = item['Type'] == 'Series';
-    final canPlay = !isSeries || _nextUp != null || _seasonEpisodes.isNotEmpty;
+    final isContainer = !isSeries && item['IsFolder'] == true;
+    final canPlay = isSeries ? (_nextUp != null || _seasonEpisodes.isNotEmpty) : (isContainer ? _tracks.isNotEmpty : true);
     final selectedSeasonName = _seasons.whereType<Map<String, dynamic>>().firstWhere((s) => s['Id'] == _selectedSeasonId, orElse: () => const {})['Name'] as String?;
 
     return Scaffold(
@@ -295,6 +325,18 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ),
           ],
+          if (isContainer && _tracks.isNotEmpty) ...[
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(20, 8, 20, 8),
+                child: Text('Tracks', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            SliverList.builder(
+              itemCount: _tracks.length,
+              itemBuilder: (context, index) => _TrackRow(track: _tracks[index], onPlay: _playTrack),
+            ),
+          ],
           if (cast.isNotEmpty) ...[
             const SliverToBoxAdapter(
               child: Padding(
@@ -374,6 +416,44 @@ class _CastMember extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TrackRow extends StatelessWidget {
+  const _TrackRow({required this.track, required this.onPlay});
+  final dynamic track;
+  final void Function(Map<String, dynamic> track) onPlay;
+
+  String _formatDuration(dynamic ticks) {
+    final duration = ticksToDuration(ticks);
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final hours = duration.inHours;
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return hours > 0 ? '$hours:$minutes:$seconds' : '${duration.inMinutes}:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (track is! Map<String, dynamic>) return const SizedBox.shrink();
+    final item = track as Map<String, dynamic>;
+    final name = item['Name'] as String? ?? 'Track';
+    final index = item['IndexNumber'];
+    final runTimeTicks = item['RunTimeTicks'];
+    final isPlayed = (item['UserData'] as Map<String, dynamic>?)?['Played'] == true;
+
+    return ListTile(
+      onTap: () => onPlay(item),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      leading: SizedBox(
+        width: 28,
+        child: Text(index != null ? '$index' : '', textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFA5A7AC))),
+      ),
+      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 15)),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (isPlayed) Padding(padding: const EdgeInsets.only(right: 8), child: Icon(Icons.check, size: 16, color: Theme.of(context).colorScheme.primary)),
+        if (runTimeTicks != null) Text(_formatDuration(runTimeTicks), style: const TextStyle(color: Color(0xFFA5A7AC), fontSize: 13)),
+      ]),
     );
   }
 }

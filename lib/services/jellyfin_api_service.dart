@@ -349,6 +349,26 @@ class JellyfinApiService {
     return const [];
   }
 
+  // For any playable folder that isn't a Series (music albums, audiobook
+  // folders, playlists): its direct children are the actually-playable items.
+  Future<List<dynamic>> getChildItems(String serverUrl, String userId, String token, String parentId) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(queryParameters: {
+      'ParentId': parentId,
+      'SortBy': 'IndexNumber,SortName',
+      'SortOrder': 'Ascending',
+      'Fields': 'PrimaryImageTag,ImageTags,RunTimeTicks,IndexNumber',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getChildItems failed for $parentId: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load items.');
+    }
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
   Future<Map<String, dynamic>?> getNextUp(String serverUrl, String userId, String token, String seriesId) async {
     final cleanUrl = _normalizeUrl(serverUrl);
     final uri = Uri.parse('$cleanUrl/Shows/NextUp').replace(queryParameters: {
