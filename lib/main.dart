@@ -4,40 +4,54 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'calendar_screen.dart';
 import 'services/jellyfin_api_service.dart';
+import 'settings_controller.dart';
+import 'settings_screen.dart';
 
-void main() => runApp(const BlackTheatreTvApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final settings = SettingsController();
+  await settings.load();
+  runApp(BlackTheatreTvApp(settings: settings));
+}
 
 class BlackTheatreTvApp extends StatelessWidget {
-  const BlackTheatreTvApp({super.key});
+  const BlackTheatreTvApp({super.key, required this.settings});
+  final SettingsController settings;
 
   @override
   Widget build(BuildContext context) {
     const background = Color(0xFF090A0C);
-    return MaterialApp(
-      title: 'Black Theatre',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: background,
-        colorScheme: const ColorScheme.dark(primary: Colors.white, surface: Color(0xFF141518)),
-        appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF191A1E),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.white.withValues(alpha: .6))),
-          labelStyle: const TextStyle(color: Color(0xFFA5A7AC)),
+    return AnimatedBuilder(
+      animation: settings,
+      builder: (context, _) => MaterialApp(
+        title: 'Black Theatre',
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData.dark().copyWith(
+          scaffoldBackgroundColor: background,
+          colorScheme: ColorScheme.dark(primary: settings.accentColor, surface: const Color(0xFF141518)),
+          appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: const Color(0xFF191A1E),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: settings.accentColor.withValues(alpha: .8))),
+            labelStyle: const TextStyle(color: Color(0xFFA5A7AC)),
+          ),
+          textTheme: ThemeData.dark().textTheme.apply(bodyColor: Colors.white, displayColor: Colors.white),
+          filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(backgroundColor: settings.accentColor, foregroundColor: Colors.white)),
         ),
-        textTheme: ThemeData.dark().textTheme.apply(bodyColor: Colors.white, displayColor: Colors.white),
+        home: AuthenticationScreen(settings: settings),
       ),
-      home: const AuthenticationScreen(),
     );
   }
 }
 
 class AuthenticationScreen extends StatefulWidget {
-  const AuthenticationScreen({super.key});
+  const AuthenticationScreen({super.key, required this.settings});
+  final SettingsController settings;
   @override
   State<AuthenticationScreen> createState() => _AuthenticationScreenState();
 }
@@ -59,7 +73,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
       await prefs.setString('userId', session.userId);
       await prefs.setString('accessToken', session.token);
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomePage(session: session)));
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomePage(session: session, settings: widget.settings)));
     } catch (_) {
       if (mounted) setState(() => _error = 'We could not connect. Check your details and try again.');
     } finally {
@@ -75,7 +89,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
             child: Padding(
               padding: const EdgeInsets.all(32),
               child: ListView(shrinkWrap: true, children: [
-                const Icon(Icons.movie_filter_outlined, size: 48),
+                Image.asset('assets/images/logo_mark.png', width: 88, height: 88),
                 const SizedBox(height: 24),
                 Text('Welcome to your theatre.', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
@@ -97,8 +111,9 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.session});
+  const HomePage({super.key, required this.session, required this.settings});
   final JellyfinSession session;
+  final SettingsController settings;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -111,6 +126,8 @@ class _HomePageState extends State<HomePage> {
   Map<String, List<dynamic>> _categoryItems = {};
   String? _selectedCategoryId;
   bool _isLoadingHome = true;
+  List<dynamic> _selectedCategoryItems = const [];
+  bool _isLoadingSelectedCategory = false;
 
   @override
   void initState() {
@@ -152,6 +169,35 @@ class _HomePageState extends State<HomePage> {
   void _selectCategory(String? id) {
     Navigator.of(context).pop();
     setState(() => _selectedCategoryId = id);
+    if (id != null) _loadSelectedCategory(id);
+  }
+
+  Future<void> _loadSelectedCategory(String id) async {
+    setState(() => _isLoadingSelectedCategory = true);
+    final sort = widget.settings.sortFor(id);
+    final items = await _loadSection('selected category $id', () => _api.getLibraryItems(widget.session.serverUrl, widget.session.userId, widget.session.token, id, sort: sort));
+    if (!mounted || _selectedCategoryId != id) return;
+    setState(() {
+      _selectedCategoryItems = items;
+      _isLoadingSelectedCategory = false;
+    });
+  }
+
+  void _changeSort(SortOption option) {
+    final id = _selectedCategoryId;
+    if (id == null) return;
+    widget.settings.setSortFor(id, option);
+    _loadSelectedCategory(id);
+  }
+
+  void _openSettings() {
+    Navigator.of(context).pop();
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(settings: widget.settings)));
+  }
+
+  void _openCalendar() {
+    Navigator.of(context).pop();
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => CalendarScreen(serverUrl: widget.session.serverUrl, userId: widget.session.userId, token: widget.session.token)));
   }
 
   @override
@@ -164,9 +210,17 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: Text(selected != null && selected['Name'] is String ? (selected['Name'] as String).toUpperCase() : 'BLACK THEATRE', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8)),
         leading: Builder(builder: (context) => IconButton(onPressed: () => Scaffold.of(context).openDrawer(), icon: const Icon(Icons.menu))),
-        actions: [IconButton(onPressed: () {}, icon: const Icon(Icons.search))],
+        actions: [
+          if (_selectedCategoryId != null)
+            PopupMenuButton<SortOption>(
+              icon: const Icon(Icons.sort),
+              onSelected: _changeSort,
+              itemBuilder: (context) => [for (final option in SortOption.values) PopupMenuItem(value: option, child: Text(option.label))],
+            ),
+          IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
+        ],
       ),
-      drawer: _CategoryDrawer(libraryViews: _libraryViews, selectedId: _selectedCategoryId, onSelect: _selectCategory),
+      drawer: _CategoryDrawer(libraryViews: _libraryViews, selectedId: _selectedCategoryId, onSelect: _selectCategory, onSettings: _openSettings, onCalendar: _openCalendar),
       body: _selectedCategoryId == null
           ? ListView(
               padding: const EdgeInsets.only(bottom: 32),
@@ -184,16 +238,18 @@ class _HomePageState extends State<HomePage> {
                     ),
               ],
             )
-          : _CategoryGrid(items: _categoryItems[_selectedCategoryId] ?? const [], serverUrl: widget.session.serverUrl, token: widget.session.token, isLoading: _isLoadingHome),
+          : _CategoryGrid(items: _selectedCategoryItems, serverUrl: widget.session.serverUrl, token: widget.session.token, isLoading: _isLoadingSelectedCategory),
     );
   }
 }
 
 class _CategoryDrawer extends StatelessWidget {
-  const _CategoryDrawer({required this.libraryViews, required this.selectedId, required this.onSelect});
+  const _CategoryDrawer({required this.libraryViews, required this.selectedId, required this.onSelect, required this.onSettings, required this.onCalendar});
   final List<dynamic> libraryViews;
   final String? selectedId;
   final void Function(String?) onSelect;
+  final VoidCallback onSettings;
+  final VoidCallback onCalendar;
 
   @override
   Widget build(BuildContext context) => Drawer(
@@ -219,6 +275,9 @@ class _CategoryDrawer extends StatelessWidget {
                     selectedTileColor: const Color(0xFF1B1D22),
                     onTap: () => onSelect(view['Id'] as String),
                   ),
+              const Padding(padding: EdgeInsets.symmetric(horizontal: 20), child: Divider(color: Color(0xFF1B1D22))),
+              ListTile(leading: const Icon(Icons.calendar_today_outlined), title: const Text('Calendar'), onTap: onCalendar),
+              ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('Settings'), onTap: onSettings),
             ],
           ),
         ),

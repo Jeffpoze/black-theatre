@@ -4,6 +4,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../settings_controller.dart';
+
 class JellyfinSession {
   const JellyfinSession({required this.serverUrl, required this.userId, required this.token});
 
@@ -93,6 +95,52 @@ class JellyfinApiService {
     final data = jsonDecode(response.body);
     if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
     return const [];
+  }
+
+  Future<List<dynamic>> getLibraryItems(String serverUrl, String userId, String token, String viewId, {required SortOption sort}) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(queryParameters: {
+      'ParentId': viewId,
+      'SortBy': sort.jellyfinSortBy,
+      'SortOrder': sort.jellyfinSortOrder,
+      'Recursive': 'true',
+      'Filters': 'IsNotFolder',
+      'Limit': '200',
+      'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,PremiereDate,CommunityRating',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getLibraryItems failed for $viewId: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load library items.');
+    }
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
+  Future<List<dynamic>> getUpcomingItems(String serverUrl, String userId, String token) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final todayUtc = DateTime.now().toUtc();
+    final minPremiereDate = DateTime.utc(todayUtc.year, todayUtc.month, todayUtc.day).toIso8601String();
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(queryParameters: {
+      'Recursive': 'true',
+      'IncludeItemTypes': 'Movie,Episode',
+      'Filters': 'IsUnaired',
+      'MinPremiereDate': minPremiereDate,
+      'SortBy': 'PremiereDate',
+      'SortOrder': 'Ascending',
+      'Limit': '100',
+      'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,SeriesName,PremiereDate,IndexNumber,ParentIndexNumber',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getUpcomingItems failed: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load upcoming releases.');
+    }
+    final data = jsonDecode(response.body);
+    final items = data is Map<String, dynamic> && data['Items'] is List<dynamic> ? data['Items'] as List<dynamic> : const [];
+    // MinPremiereDate should already exclude these, but guard against items with no known air date at all.
+    return items.where((item) => item is Map<String, dynamic> && item['PremiereDate'] is String).toList();
   }
 
   Future<List<dynamic>> getLibraryViews(String serverUrl, String userId, String token) async {
