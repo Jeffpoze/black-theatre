@@ -1,14 +1,116 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'main.dart';
+import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key, required this.settings});
+  const SettingsScreen({super.key, required this.settings, required this.session});
   final SettingsController settings;
+  final JellyfinSession session;
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('SETTINGS', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        body: ListView(
+          children: [
+            _SettingsRow(title: 'Account', subtitle: session.username, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountScreen(session: session, settings: settings)))),
+            _SettingsRow(title: 'Appearance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AppearanceScreen(settings: settings)))),
+            _SettingsRow(title: 'About', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen()))),
+          ],
+        ),
+      );
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({required this.title, this.subtitle, required this.onTap});
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          ListTile(
+            title: Text(title, style: const TextStyle(fontSize: 16)),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (subtitle != null) Padding(padding: const EdgeInsets.only(right: 8), child: Text(subtitle!, style: const TextStyle(color: Color(0xFFA5A7AC)))),
+                const Icon(Icons.chevron_right, color: Color(0xFFA5A7AC)),
+              ],
+            ),
+            onTap: onTap,
+          ),
+          const Divider(height: 1, color: Color(0xFF1B1D22), indent: 20),
+        ],
+      );
+}
+
+class AccountScreen extends StatelessWidget {
+  const AccountScreen({super.key, required this.session, required this.settings});
+  final JellyfinSession session;
+  final SettingsController settings;
+
+  Future<void> _signOut(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('serverUrl');
+    await prefs.remove('userId');
+    await prefs.remove('accessToken');
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => AuthenticationScreen(settings: settings)), (route) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('ACCOUNT', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        body: ListView(
+          children: [
+            _InfoRow(label: 'Username', value: session.username),
+            _InfoRow(label: 'Server', value: session.serverUrl),
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFFF8A80), side: const BorderSide(color: Color(0xFFFF8A80))),
+                  onPressed: () => _signOut(context),
+                  child: const Text('Sign Out'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          ListTile(
+            title: Text(label, style: const TextStyle(fontSize: 16)),
+            trailing: Text(value, style: const TextStyle(color: Color(0xFFA5A7AC))),
+          ),
+          const Divider(height: 1, color: Color(0xFF1B1D22), indent: 20),
+        ],
+      );
+}
+
+class AppearanceScreen extends StatelessWidget {
+  const AppearanceScreen({super.key, required this.settings});
+  final SettingsController settings;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('APPEARANCE', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
         body: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -60,6 +162,25 @@ class _ColorSwatch extends StatelessWidget {
             const SizedBox(height: 8),
             Text(option.name, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
           ],
+        ),
+      );
+}
+
+class AboutScreen extends StatelessWidget {
+  const AboutScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('ABOUT', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        body: const Padding(
+          padding: EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Black Theatre', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            SizedBox(height: 8),
+            Text('Version 1.0.0', style: TextStyle(color: Color(0xFFA5A7AC))),
+            SizedBox(height: 16),
+            Text('A personal Jellyfin client.', style: TextStyle(color: Color(0xFFA5A7AC))),
+          ]),
         ),
       );
 }
