@@ -86,6 +86,19 @@ class JellyfinApiService {
     return '$cleanUrl/Items/$itemId/Images/Backdrop?quality=90$tagParam$widthParam';
   }
 
+  // A transparent title-treatment image, when the metadata provider has one.
+  static String getLogoUrl(
+    String serverUrl,
+    String itemId, {
+    String? imageTag,
+    int? maxWidth,
+  }) {
+    final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
+    final tagParam = imageTag != null ? '&tag=$imageTag' : '';
+    final widthParam = maxWidth != null ? '&maxWidth=$maxWidth' : '';
+    return '$cleanUrl/Items/$itemId/Images/Logo?quality=90$tagParam$widthParam';
+  }
+
   /// Text-based subtitle codecs Jellyfin can embed as a WebVTT HLS rendition
   /// without re-encoding video. Anything else (e.g. PGS/VOBSUB image subs)
   /// needs to be burned into the video instead.
@@ -195,11 +208,15 @@ class JellyfinApiService {
         for (final format in ['dvbsub', 'dvdsub', 'pgssub'])
           {'Format': format, 'Method': 'Encode'},
       ],
-      // Without this, Jellyfin has no idea whether the player can handle
-      // Dolby Vision / HDR variants of hevc/av1/vp9 and may pick a
-      // combination the player can't actually decode. media_kit (ffmpeg) can
-      // decode a Dolby Vision stream's backwards-compatible base layer, so
-      // declare support for it alongside plain HDR10/HLG/SDR.
+      // Direct-playing a Dolby Vision stream's base layer without applying
+      // its RPU dynamic metadata produces exactly the washed-out/green look
+      // reported — media_kit's bundled decoder can read the bitstream, but
+      // doesn't apply DoVi's dynamic tone curve. Deliberately leave DOVI*
+      // out of the accepted ranges below so Jellyfin transcodes those
+      // instead: its own server-side ffmpeg does proper DoVi->HDR10/SDR
+      // conversion, and we just play the corrected result. Plain HDR10/HLG
+      // (no DoVi layer) still direct-plays fine with the tone-mapping set
+      // above.
       'CodecProfiles': [
         for (final codec in ['hevc', 'av1', 'vp9'])
           {
@@ -212,7 +229,7 @@ class JellyfinApiService {
                 'Condition': 'EqualsAny',
                 'IsRequired': true,
                 'Property': 'VideoRangeType',
-                'Value': 'SDR|HDR10|HDR10Plus|HLG|DOVI|DOVIWithSDR|DOVIWithHDR10|DOVIWithHDR10Plus|DOVIWithHLG|DOVIWithEL|DOVIWithELHDR10Plus',
+                'Value': 'SDR|HDR10|HDR10Plus|HLG',
               },
             ],
           },

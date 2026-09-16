@@ -29,6 +29,7 @@ class _DetailScreenState extends State<DetailScreen> {
   List<dynamic> _seasonEpisodes = const [];
   bool _isLoadingEpisodes = false;
   List<dynamic> _tracks = const [];
+  List<dynamic> _techStreams = const [];
   bool _isLoading = true;
   String? _error;
   bool _favoriteBusy = false;
@@ -69,6 +70,14 @@ class _DetailScreenState extends State<DetailScreen> {
       });
       final defaultSeasonId = (nextUp?['SeasonId'] as String?) ?? seasons.whereType<Map<String, dynamic>>().firstOrNull?['Id'] as String?;
       if (defaultSeasonId != null) _selectSeason(defaultSeasonId);
+      // Only leaf playable items have their own media file to describe. For
+      // a series, describe whichever episode "Play" would actually start.
+      final techItemId = item['Type'] == 'Series' ? (nextUp?['Id'] as String?) : (item['IsFolder'] == true ? null : widget.itemId);
+      if (techItemId != null) {
+        _api.getMediaStreams(widget.serverUrl, widget.userId, widget.token, techItemId).then((streams) {
+          if (mounted) setState(() => _techStreams = streams);
+        }).catchError((_) {});
+      }
     } catch (_) {
       if (mounted) setState(() { _isLoading = false; _error = 'Unable to load details.'; });
     }
@@ -222,12 +231,17 @@ class _DetailScreenState extends State<DetailScreen> {
     final year = item['ProductionYear']?.toString();
     final officialRating = item['OfficialRating'] as String?;
     final communityRating = item['CommunityRating'];
+    final criticRating = item['CriticRating'];
     final overview = item['Overview'] as String?;
     final genres = (item['Genres'] as List<dynamic>?)?.whereType<String>().join(', ');
     final studios = (item['Studios'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().map((s) => s['Name'] as String?).whereType<String>().join(', ');
-    final cast = (item['People'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().where((p) => p['Type'] == 'Actor').toList() ?? const [];
+    final people = (item['People'] as List<dynamic>?)?.whereType<Map<String, dynamic>>() ?? const [];
+    final cast = people.where((p) => p['Type'] == 'Actor').toList();
+    final directors = people.where((p) => p['Type'] == 'Director').map((p) => p['Name'] as String?).whereType<String>().join(', ');
     final backdropTag = (item['BackdropImageTags'] as List<dynamic>?)?.whereType<String>().firstOrNull;
     final backdropUrl = backdropTag != null ? JellyfinApiService.getBackdropUrl(widget.serverUrl, widget.itemId, imageTag: backdropTag, maxWidth: 1200) : null;
+    final logoTag = (item['ImageTags'] as Map?)?['Logo'] as String?;
+    final logoUrl = logoTag != null ? JellyfinApiService.getLogoUrl(widget.serverUrl, widget.itemId, imageTag: logoTag, maxWidth: 800) : null;
     final isSeries = item['Type'] == 'Series';
     final isContainer = !isSeries && item['IsFolder'] == true;
     final canPlay = isSeries ? (_nextUp != null || _seasonEpisodes.isNotEmpty) : (isContainer ? _tracks.isNotEmpty : true);
@@ -271,6 +285,24 @@ class _DetailScreenState extends State<DetailScreen> {
                             const DecoratedBox(
                               decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF090A0C)])),
                             ),
+                            if (logoUrl != null)
+                              Positioned(
+                                left: 20,
+                                right: 20,
+                                bottom: 20,
+                                child: Align(
+                                  alignment: Alignment.bottomLeft,
+                                  child: CachedNetworkImage(
+                                    imageUrl: logoUrl,
+                                    httpHeaders: JellyfinApiService.authHeaders(widget.token),
+                                    memCacheWidth: 800,
+                                    fit: BoxFit.contain,
+                                    alignment: Alignment.bottomLeft,
+                                    height: 90,
+                                    errorWidget: (_, _, _) => const SizedBox.shrink(),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                 ),
@@ -281,44 +313,44 @@ class _DetailScreenState extends State<DetailScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                    if (year != null) Text(year, style: const TextStyle(color: Color(0xFFA5A7AC))),
-                    if (officialRating != null) Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(border: Border.all(color: const Color(0xFFA5A7AC)), borderRadius: BorderRadius.circular(4)), child: Text(officialRating, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC)))),
-                    if (communityRating != null)
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.star, size: 16, color: Colors.amber),
-                        const SizedBox(width: 4),
-                        Text((communityRating as num).toStringAsFixed(1), style: const TextStyle(color: Color(0xFFA5A7AC))),
-                      ]),
-                  ]),
+                  // The title is already shown via the logo image above when
+                  // one exists, so it isn't repeated here.
+                  if (logoUrl == null) ...[
+                    Text(name, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 8),
+                  ],
+                  if (isSeries && _nextUp != null)
+                    _EpisodeMetaRow(episode: _nextUp!, fallbackRating: officialRating)
+                  else
+                    Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                      if (year != null) Text(year, style: const TextStyle(color: Color(0xFFA5A7AC))),
+                      if (officialRating != null) _RatingPill(text: officialRating),
+                      if (communityRating != null) _RatingBadge(icon: Icons.star, color: Colors.amber, value: (communityRating as num).toStringAsFixed(1)),
+                      if (criticRating != null) _RatingBadge(icon: Icons.local_movies, color: const Color(0xFFFF5252), value: '${(criticRating as num).round()}%'),
+                    ]),
                   const SizedBox(height: 20),
                   if (canPlay) ...[
                     SizedBox(
                       width: double.infinity,
                       height: 48,
                       child: FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
                         onPressed: _playMain,
                         icon: const Icon(Icons.play_arrow),
-                        label: Text(_hasResumablePlay ? 'Resume' : 'Play'),
+                        label: Text(_hasResumablePlay ? 'Resume' : 'Watch'),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                   ],
-                  Row(children: [
-                    IconButton(
-                      onPressed: _toggleWatched,
-                      icon: Icon(_isWatched ? Icons.check_circle : Icons.check_circle_outline, color: _isWatched ? Theme.of(context).colorScheme.primary : Colors.white70),
-                    ),
-                    IconButton(
-                      onPressed: _toggleFavorite,
-                      icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border, color: _isFavorite ? Theme.of(context).colorScheme.primary : Colors.white70),
-                    ),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                    _ActionButton(icon: _isFavorite ? Icons.bookmark : Icons.bookmark_border, label: 'Watchlist', active: _isFavorite, onTap: _toggleFavorite),
+                    _ActionButton(icon: _isWatched ? Icons.check_circle : Icons.check_circle_outline, label: 'Watched', active: _isWatched, onTap: _toggleWatched),
                   ]),
-                  if (overview != null) ...[const SizedBox(height: 16), Text(overview, style: const TextStyle(height: 1.4))],
+                  if (overview != null) ...[const SizedBox(height: 20), Text(overview, style: const TextStyle(height: 1.4))],
+                  if (directors.isNotEmpty) ...[const SizedBox(height: 12), Text('Directed by $directors', style: const TextStyle(color: Color(0xFFA5A7AC)))],
                   if (genres != null && genres.isNotEmpty) ...[const SizedBox(height: 16), _LabelValue(label: 'Genres', value: genres)],
                   if (studios != null && studios.isNotEmpty) ...[const SizedBox(height: 8), _LabelValue(label: 'Studios', value: studios)],
+                  if (_techStreams.isNotEmpty) ...[const SizedBox(height: 20), _TechInfo(streams: _techStreams)],
                 ],
               ),
             ),
@@ -329,10 +361,14 @@ class _DetailScreenState extends State<DetailScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
                 child: GestureDetector(
                   onTap: _openSeasonPicker,
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text(selectedSeasonName ?? 'Season', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                    const Icon(Icons.arrow_drop_down),
-                  ]),
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(14, 6, 8, 6),
+                    decoration: BoxDecoration(color: const Color(0xFF1B1D22), borderRadius: BorderRadius.circular(20)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Text(selectedSeasonName ?? 'Season', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      const Icon(Icons.expand_more, size: 20),
+                    ]),
+                  ),
                 ),
               ),
             ),
@@ -388,6 +424,156 @@ class _DetailScreenState extends State<DetailScreen> {
       ),
     );
   }
+}
+
+class _EpisodeMetaRow extends StatelessWidget {
+  const _EpisodeMetaRow({required this.episode, this.fallbackRating});
+  final Map<String, dynamic> episode;
+  final String? fallbackRating;
+
+  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  String? _formatDate(String? iso) {
+    final date = iso == null ? null : DateTime.tryParse(iso);
+    if (date == null) return null;
+    return '${_months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final season = episode['ParentIndexNumber'];
+    final indexNumber = episode['IndexNumber'];
+    final date = _formatDate(episode['PremiereDate'] as String?);
+    final runtimeTicks = episode['RunTimeTicks'];
+    final runtimeMinutes = runtimeTicks != null ? ticksToDuration(runtimeTicks).inMinutes : null;
+    final rating = (episode['OfficialRating'] as String?) ?? fallbackRating;
+
+    return Wrap(spacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      if (season != null && indexNumber != null) Text('S$season • E$indexNumber', style: const TextStyle(color: Color(0xFFA5A7AC), fontWeight: FontWeight.w600)),
+      if (date != null) Text(date, style: const TextStyle(color: Color(0xFFA5A7AC))),
+      if (runtimeMinutes != null && runtimeMinutes > 0) Text('${runtimeMinutes}m', style: const TextStyle(color: Color(0xFFA5A7AC))),
+      if (rating != null) _RatingPill(text: rating),
+    ]);
+  }
+}
+
+class _RatingPill extends StatelessWidget {
+  const _RatingPill({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(border: Border.all(color: const Color(0xFFA5A7AC)), borderRadius: BorderRadius.circular(4)),
+        child: Text(text, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
+      );
+}
+
+class _RatingBadge extends StatelessWidget {
+  const _RatingBadge({required this.icon, required this.color, required this.value});
+  final IconData icon;
+  final Color color;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 4),
+        Text(value, style: const TextStyle(color: Color(0xFFA5A7AC))),
+      ]);
+}
+
+class _ActionButton extends StatelessWidget {
+  const _ActionButton({required this.icon, required this.label, required this.active, required this.onTap});
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF1B1D22)),
+            child: Icon(icon, color: active ? Theme.of(context).colorScheme.primary : Colors.white70),
+          ),
+          const SizedBox(height: 6),
+          Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
+        ]),
+      );
+}
+
+class _TechInfo extends StatelessWidget {
+  const _TechInfo({required this.streams});
+  final List<dynamic> streams;
+
+  static const _codecLabels = {
+    'h264': 'H.264', 'hevc': 'HEVC', 'av1': 'AV1', 'vp9': 'VP9', 'vp8': 'VP8',
+    'mpeg2video': 'MPEG-2', 'mpeg4': 'MPEG-4', 'vc1': 'VC-1',
+    'aac': 'AAC', 'ac3': 'AC3', 'eac3': 'E-AC3', 'dts': 'DTS', 'truehd': 'TrueHD',
+    'flac': 'FLAC', 'mp3': 'MP3', 'opus': 'Opus', 'pcm_s16le': 'PCM',
+    'subrip': 'SRT', 'srt': 'SRT', 'ass': 'ASS', 'ssa': 'SSA', 'pgssub': 'PGS',
+    'dvdsub': 'VOBSUB', 'dvbsub': 'DVBSUB', 'mov_text': 'MOV Text', 'vtt': 'VTT', 'webvtt': 'VTT',
+  };
+
+  String _codecLabel(String? codec) {
+    if (codec == null) return '';
+    return _codecLabels[codec.toLowerCase()] ?? codec.toUpperCase();
+  }
+
+  String _resolutionLabel(int? height) {
+    if (height == null) return '';
+    if (height >= 2000) return '4K';
+    if (height >= 1300) return '1440p';
+    if (height >= 900) return '1080p';
+    if (height >= 600) return '720p';
+    return '${height}p';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final all = streams.whereType<Map<String, dynamic>>().toList();
+    final video = all.firstWhereOrNull((s) => s['Type'] == 'Video');
+    final audio = all.firstWhereOrNull((s) => s['Type'] == 'Audio' && s['IsDefault'] == true) ?? all.firstWhereOrNull((s) => s['Type'] == 'Audio');
+    final subtitle = all.firstWhereOrNull((s) => s['Type'] == 'Subtitle' && s['IsDefault'] == true) ?? all.firstWhereOrNull((s) => s['Type'] == 'Subtitle');
+
+    String? videoLine;
+    if (video != null) {
+      final res = _resolutionLabel(video['Height'] as int?);
+      final isDovi = (video['VideoRangeType'] as String?)?.toUpperCase().contains('DOVI') == true;
+      final profile = video['Profile'] as String?;
+      final codec = _codecLabel(video['Codec'] as String?);
+      videoLine = '$res${isDovi ? ' DoVi' : ''} ($codec${profile != null ? ' $profile' : ''})';
+    }
+
+    final audioLine = audio == null ? null : (audio['DisplayTitle'] as String? ?? '${(audio['Language'] as String?)?.toUpperCase() ?? 'Unknown'} (${_codecLabel(audio['Codec'] as String?)})');
+    final subtitleLine = subtitle == null ? null : (subtitle['DisplayTitle'] as String? ?? '${(subtitle['Language'] as String?)?.toUpperCase() ?? 'Unknown'} (${_codecLabel(subtitle['Codec'] as String?)})');
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (videoLine != null) _InfoRow(label: 'Video', value: videoLine),
+      if (audioLine != null) _InfoRow(label: 'Audio', value: audioLine),
+      if (subtitleLine != null) _InfoRow(label: 'Subtitles', value: subtitleLine),
+    ]);
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 90, child: Text(label, style: const TextStyle(color: Color(0xFFA5A7AC)))),
+          Expanded(child: Text(value)),
+        ]),
+      );
 }
 
 class _LabelValue extends StatelessWidget {
