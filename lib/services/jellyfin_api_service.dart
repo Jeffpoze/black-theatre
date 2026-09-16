@@ -766,7 +766,7 @@ class JellyfinApiService {
     final uri = Uri.parse('$cleanUrl/Shows/$seriesId/Episodes').replace(
       queryParameters: {
         'userId': userId,
-        'Fields': 'PrimaryImageTag,ImageTags,Overview,PremiereDate',
+        'Fields': 'PrimaryImageTag,ImageTags,Overview,PremiereDate,RunTimeTicks,OfficialRating',
         'SeasonId': ?seasonId,
       },
     );
@@ -825,7 +825,7 @@ class JellyfinApiService {
         'userId': userId,
         'SeriesId': seriesId,
         'Limit': '1',
-        'Fields': 'PrimaryImageTag,ImageTags,Overview,PremiereDate',
+        'Fields': 'PrimaryImageTag,ImageTags,Overview,PremiereDate,RunTimeTicks,OfficialRating',
       },
     );
     final response = await _client.get(uri, headers: authHeaders(token));

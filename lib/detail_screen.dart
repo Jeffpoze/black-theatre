@@ -51,43 +51,58 @@ class _DetailScreenState extends State<DetailScreen> {
   Future<void> _load() async {
     try {
       final item = await _api.getItemDetail(widget.serverUrl, widget.userId, widget.token, widget.itemId);
-      List<dynamic> seasons = const [];
-      Map<String, dynamic>? nextUp;
-      List<dynamic> tracks = const [];
-      if (item['Type'] == 'Series') {
-        final results = await Future.wait([
-          _api.getSeasons(widget.serverUrl, widget.userId, widget.token, widget.itemId),
-          _api.getNextUp(widget.serverUrl, widget.userId, widget.token, widget.itemId),
-        ]);
-        seasons = results[0] as List<dynamic>;
-        nextUp = results[1] as Map<String, dynamic>?;
-      } else if (item['IsFolder'] == true) {
-        // A playable folder that isn't a Series (music album, audiobook
-        // folder, playlist, box set): its children are what's actually
-        // playable, not the folder itself.
-        tracks = await _api.getChildItems(widget.serverUrl, widget.userId, widget.token, widget.itemId);
-      }
       if (!mounted) return;
       setState(() {
         _item = item;
+        _isLoading = false;
+      });
+      if (item['Type'] == 'Series') {
+        _loadSeriesExtras();
+      } else if (item['IsFolder'] == true) {
+        _loadTracks();
+      } else {
+        _loadTechStreams(widget.itemId);
+      }
+    } catch (error) {
+      if (mounted) setState(() { _isLoading = false; _error = 'Unable to load details.\n$error'; });
+    }
+  }
+
+  Future<void> _loadSeriesExtras() async {
+    try {
+      final results = await Future.wait([
+        _api.getSeasons(widget.serverUrl, widget.userId, widget.token, widget.itemId),
+        _api.getNextUp(widget.serverUrl, widget.userId, widget.token, widget.itemId),
+      ]);
+      if (!mounted) return;
+      final seasons = results[0] as List<dynamic>;
+      final nextUp = results[1] as Map<String, dynamic>?;
+      setState(() {
         _seasons = seasons;
         _nextUp = nextUp;
-        _tracks = tracks;
-        _isLoading = false;
       });
       final defaultSeasonId = (nextUp?['SeasonId'] as String?) ?? seasons.whereType<Map<String, dynamic>>().firstOrNull?['Id'] as String?;
       if (defaultSeasonId != null) _selectSeason(defaultSeasonId);
-      // Only leaf playable items have their own media file to describe. For
-      // a series, describe whichever episode "Play" would actually start.
-      final techItemId = item['Type'] == 'Series' ? (nextUp?['Id'] as String?) : (item['IsFolder'] == true ? null : widget.itemId);
-      if (techItemId != null) {
-        _api.getMediaStreams(widget.serverUrl, widget.userId, widget.token, techItemId).then((streams) {
-          if (mounted) setState(() => _techStreams = streams);
-        }).catchError((_) {});
-      }
+      final techItemId = nextUp?['Id'] as String?;
+      if (techItemId != null) _loadTechStreams(techItemId);
     } catch (_) {
-      if (mounted) setState(() { _isLoading = false; _error = 'Unable to load details.'; });
+      // The item detail remains usable if a series-only endpoint is slow or
+      // temporarily unavailable.
     }
+  }
+
+  Future<void> _loadTracks() async {
+    try {
+      final tracks = await _api.getChildItems(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+      if (mounted) setState(() => _tracks = tracks);
+    } catch (_) {}
+  }
+
+  Future<void> _loadTechStreams(String itemId) async {
+    try {
+      final streams = await _api.getMediaStreams(widget.serverUrl, widget.userId, widget.token, itemId);
+      if (mounted) setState(() => _techStreams = streams);
+    } catch (_) {}
   }
 
   Future<void> _selectSeason(String seasonId) async {
@@ -119,20 +134,21 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  Future<void> _toggleWatched() async {
+  Future<void> _setWatched(bool watched) async {
     final item = _item;
     if (item == null || _watchedBusy) return;
-    final next = !_isWatched;
     setState(() => _watchedBusy = true);
     try {
-      await _api.setWatched(widget.serverUrl, widget.userId, widget.token, widget.itemId, next);
+      await _api.setWatched(widget.serverUrl, widget.userId, widget.token, widget.itemId, watched);
       if (!mounted) return;
-      setState(() => (item['UserData'] as Map<String, dynamic>)['Played'] = next);
+      setState(() => (item['UserData'] as Map<String, dynamic>)['Played'] = watched);
     } catch (_) {
     } finally {
       if (mounted) setState(() => _watchedBusy = false);
     }
   }
+
+  Future<void> _toggleWatched() => _setWatched(!_isWatched);
 
   void _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false, bool isAudioOnly = false}) {
     final route = MaterialPageRoute<void>(
@@ -145,7 +161,7 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  void _playEpisode(Map<String, dynamic> episode, {bool replace = false}) {
+  void _playEpisode(Map<String, dynamic> episode, {bool replace = false, bool fromBeginning = false}) {
     final itemId = episode['Id'] as String?;
     if (itemId == null) return;
     final seriesName = _item?['Name'] as String? ?? '';
@@ -157,16 +173,16 @@ class _DetailScreenState extends State<DetailScreen> {
     final episodes = _seasonEpisodes.whereType<Map<String, dynamic>>().toList();
     final index = episodes.indexWhere((e) => e['Id'] == itemId);
     final next = index >= 0 && index + 1 < episodes.length ? episodes[index + 1] : null;
-    _play(itemId, seriesName, subtitle: subtitle, startPosition: ticksToDuration(ticks), replace: replace, onNext: next == null ? null : () => _playEpisode(next, replace: true));
+    _play(itemId, seriesName, subtitle: subtitle, startPosition: fromBeginning ? Duration.zero : ticksToDuration(ticks), replace: replace, onNext: next == null ? null : () => _playEpisode(next, replace: true));
   }
 
-  void _playTrack(Map<String, dynamic> track) {
+  void _playTrack(Map<String, dynamic> track, {bool fromBeginning = false}) {
     final itemId = track['Id'] as String?;
     if (itemId == null) return;
     final title = (track['Name'] as String?) ?? 'Track';
     final ticks = (track['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'];
     final isAudioOnly = track['Type'] == 'Audio' || track['Type'] == 'AudioBook';
-    _play(itemId, title, startPosition: ticksToDuration(ticks), isAudioOnly: isAudioOnly);
+    _play(itemId, title, startPosition: fromBeginning ? Duration.zero : ticksToDuration(ticks), isAudioOnly: isAudioOnly);
   }
 
   Map<String, dynamic>? get _firstPlayableTrack {
@@ -174,28 +190,28 @@ class _DetailScreenState extends State<DetailScreen> {
     return tracks.firstWhereOrNull((t) => (t['UserData'] as Map<String, dynamic>?)?['Played'] != true) ?? tracks.firstOrNull;
   }
 
-  void _playMain() {
+  void _playMain({bool fromBeginning = false}) {
     final item = _item;
     if (item == null) return;
     final name = item['Name'] as String? ?? 'Untitled';
     if (item['Type'] == 'Series') {
       final nextUp = _nextUp;
       if (nextUp != null) {
-        _playEpisode(nextUp);
+        _playEpisode(nextUp, fromBeginning: fromBeginning);
         return;
       }
       final firstEpisode = _seasonEpisodes.whereType<Map<String, dynamic>>().firstOrNull;
-      if (firstEpisode != null) _playEpisode(firstEpisode);
+      if (firstEpisode != null) _playEpisode(firstEpisode, fromBeginning: fromBeginning);
       return;
     }
     if (item['IsFolder'] == true) {
       final track = _firstPlayableTrack;
-      if (track != null) _playTrack(track);
+      if (track != null) _playTrack(track, fromBeginning: fromBeginning);
       return;
     }
     final ticks = (item['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'];
     final isAudioOnly = item['Type'] == 'Audio' || item['Type'] == 'AudioBook';
-    _play(widget.itemId, name, startPosition: ticksToDuration(ticks), isAudioOnly: isAudioOnly);
+    _play(widget.itemId, name, startPosition: fromBeginning ? Duration.zero : ticksToDuration(ticks), isAudioOnly: isAudioOnly);
   }
 
   bool get _hasResumablePlay {
@@ -204,6 +220,19 @@ class _DetailScreenState extends State<DetailScreen> {
     if (item['Type'] == 'Series') return _nextUp != null && ((_nextUp!['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'] ?? 0) > 0;
     if (item['IsFolder'] == true) return ((_firstPlayableTrack?['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'] ?? 0) > 0;
     return ((item['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks'] ?? 0) > 0;
+  }
+
+  Map<String, dynamic>? get _resumeItem => _item?['Type'] == 'Series' ? _nextUp : (_item?['IsFolder'] == true ? _firstPlayableTrack : _item);
+
+  String? get _remainingTimeLabel {
+    final resumeItem = _resumeItem;
+    if (resumeItem == null) return null;
+    final total = ticksToDuration(resumeItem['RunTimeTicks']);
+    final position = ticksToDuration((resumeItem['UserData'] as Map<String, dynamic>?)?['PlaybackPositionTicks']);
+    final remaining = total > position ? total - position : Duration.zero;
+    if (remaining <= Duration.zero) return null;
+    final minutes = remaining.inMinutes;
+    return minutes >= 60 ? '${minutes ~/ 60}h ${minutes.remainder(60)}m left' : '${minutes}m left';
   }
 
   Future<void> _openSeasonPicker() async {
@@ -231,6 +260,36 @@ class _DetailScreenState extends State<DetailScreen> {
   void _showUnavailable(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$feature is coming soon.')),
+    );
+  }
+
+  Future<void> _openMoreActions() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 38, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4))),
+              const SizedBox(height: 16),
+              const Text('More Actions', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700)),
+              const Divider(height: 30, color: Color(0xFF252525)),
+              _MoreAction(icon: _isFavorite ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined, label: _isFavorite ? 'Remove from List' : 'Add to List', onTap: () { Navigator.pop(context); _toggleFavorite(); }),
+              _MoreAction(icon: Icons.playlist_add, label: 'Add To Playlist / Collection', onTap: () { Navigator.pop(context); _showUnavailable('Playlists'); }),
+              _MoreAction(icon: Icons.forum_outlined, label: 'Start a Discussion', onTap: () { Navigator.pop(context); _showUnavailable('Discussions'); }),
+              if (_item?['Type'] == 'Episode') _MoreAction(icon: Icons.tv_outlined, label: 'Go to Show', onTap: () => Navigator.pop(context)),
+              _MoreAction(icon: _isWatched ? Icons.remove_done_outlined : Icons.done_all, label: _isWatched ? 'Mark as Unwatched' : 'Mark as Watched', onTap: () { Navigator.pop(context); _setWatched(!_isWatched); }),
+              _MoreAction(icon: Icons.info_outline, label: 'File Info', onTap: () { Navigator.pop(context); _showUnavailable('File info'); }),
+              _MoreAction(icon: Icons.format_list_bulleted, label: 'More Ways to Watch', onTap: () { Navigator.pop(context); _showUnavailable('More ways to watch'); }),
+              _MoreAction(icon: Icons.share_outlined, label: 'Share', onTap: () { Navigator.pop(context); _showUnavailable('Sharing'); }),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -391,16 +450,13 @@ class _DetailScreenState extends State<DetailScreen> {
                     ]),
                   const SizedBox(height: 20),
                   if (canPlay) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-                        onPressed: _playMain,
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(_hasResumablePlay ? 'Resume' : 'Watch'),
-                      ),
-                    ),
+                    Row(children: [
+                      Expanded(child: SizedBox(height: 52, child: FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black), onPressed: _playMain, icon: const Icon(Icons.play_arrow), label: Text(_hasResumablePlay && _remainingTimeLabel != null ? 'Resume • $_remainingTimeLabel' : (_hasResumablePlay ? 'Resume' : 'Watch'))))),
+                      if (_hasResumablePlay) ...[
+                        const SizedBox(width: 12),
+                        IconButton.filled(onPressed: () => _playMain(fromBeginning: true), icon: const Icon(Icons.replay), style: IconButton.styleFrom(backgroundColor: Colors.white24, foregroundColor: Colors.white, fixedSize: const Size(52, 52)), tooltip: 'Play from beginning'),
+                      ],
+                    ]),
                     const SizedBox(height: 16),
                   ],
                   Row(
@@ -410,7 +466,7 @@ class _DetailScreenState extends State<DetailScreen> {
                       _ActionButton(icon: Icons.star_border_rounded, label: 'Rate', active: false, onTap: () => _showUnavailable('Ratings')),
                       _ActionButton(icon: _isWatched ? Icons.check_circle : Icons.check_circle_outline, label: 'Watched', active: _isWatched, onTap: _toggleWatched),
                       _ActionButton(icon: Icons.download_outlined, label: 'Download', active: false, onTap: () => _showUnavailable('Downloads')),
-                      _ActionButton(icon: Icons.more_vert, label: 'More', active: false, onTap: () => _showUnavailable('More actions')),
+                      _ActionButton(icon: Icons.more_vert, label: 'More', active: false, onTap: _openMoreActions),
                     ],
                   ),
                   if (overview != null) ...[const SizedBox(height: 20), Text(overview, style: const TextStyle(height: 1.4))],
@@ -571,6 +627,21 @@ class _ActionButton extends StatelessWidget {
           const SizedBox(height: 6),
           Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
         ]),
+      );
+}
+
+class _MoreAction extends StatelessWidget {
+  const _MoreAction({required this.icon, required this.label, required this.onTap});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(icon, color: Colors.white),
+        title: Text(label, style: const TextStyle(fontSize: 16)),
+        onTap: onTap,
       );
 }
 
