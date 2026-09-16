@@ -65,6 +65,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _controlsVisible = true;
   Timer? _hideTimer;
   StreamSubscription<bool>? _completedSub;
+  Duration _lastKnownPosition = Duration.zero;
 
   @override
   void initState() {
@@ -73,7 +74,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _player = Player();
     _controller = VideoController(_player);
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      // Seeking on a transcoded HLS stream makes Jellyfin restart the encode
+      // at the new position, which can briefly stall the read and otherwise
+      // surface as a fatal "tcp: ffurl_read returned ETIMEDOUT" error. Let
+      // ffmpeg retry the connection instead of failing immediately.
+      platform.setProperty('network-timeout', '20');
+      platform.setProperty('demuxer-lavf-o', 'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,reconnect_delay_max=5');
+    }
     _player.stream.error.listen((error) {
+      _lastKnownPosition = _player.state.position;
       if (mounted) setState(() => _error = error);
     });
     _completedSub = _player.stream.completed.listen((completed) {
@@ -197,6 +208,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _scheduleHide();
   }
 
+  void _retry() {
+    setState(() => _error = null);
+    _openStream(position: _lastKnownPosition);
+  }
+
   Future<void> _openSettings() async {
     _hideTimer?.cancel();
     final position = _player.state.position;
@@ -284,7 +300,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ? Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text('Unable to play this video.\n$_error', textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFA5A7AC))),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text('Unable to play this video.\n$_error', textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFA5A7AC))),
+                    const SizedBox(height: 20),
+                    FilledButton(onPressed: _retry, child: const Text('Retry')),
+                  ]),
                 ),
               )
             : GestureDetector(
