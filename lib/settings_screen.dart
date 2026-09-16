@@ -17,6 +17,7 @@ class SettingsScreen extends StatelessWidget {
           children: [
             _SettingsRow(title: 'Account', subtitle: session.username, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountScreen(session: session, settings: settings)))),
             _SettingsRow(title: 'Appearance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AppearanceScreen(settings: settings)))),
+            _SettingsRow(title: 'Playback', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlaybackScreen(settings: settings)))),
             _SettingsRow(title: 'About', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen()))),
           ],
         ),
@@ -162,6 +163,54 @@ class _ColorSwatch extends StatelessWidget {
             const SizedBox(height: 8),
             Text(option.name, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
           ],
+        ),
+      );
+}
+
+class PlaybackScreen extends StatelessWidget {
+  const PlaybackScreen({super.key, required this.settings});
+  final SettingsController settings;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('PLAYBACK', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        body: AnimatedBuilder(
+          animation: settings,
+          builder: (context, _) => ListView(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
+                child: Text('Skip Interval', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              ),
+              for (final seconds in skipIntervalOptions)
+                RadioListTile<int>(
+                  value: seconds,
+                  groupValue: settings.skipSeconds,
+                  title: Text('$seconds seconds'),
+                  onChanged: (value) {
+                    if (value != null) settings.setSkipSeconds(value);
+                  },
+                ),
+              const Divider(color: Color(0xFF1B1D22)),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+                child: Text('Default Quality', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text('Used when a new video starts playing. Lower this if playback lags on a slow connection.', style: TextStyle(color: Color(0xFFA5A7AC))),
+              ),
+              for (final quality in defaultQualityOptions)
+                RadioListTile<String>(
+                  value: quality,
+                  groupValue: settings.defaultQuality,
+                  title: Text(quality.qualityLabel),
+                  onChanged: (value) {
+                    if (value != null) settings.setDefaultQuality(value);
+                  },
+                ),
+            ],
+          ),
         ),
       );
 }

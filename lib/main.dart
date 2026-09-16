@@ -492,6 +492,7 @@ class _HomePageState extends State<HomePage> {
                         serverUrl: widget.session.serverUrl,
                         userId: widget.session.userId,
                         token: widget.session.token,
+                        settings: widget.settings,
                       ),
                 _MediaRow(
                   title: 'Continue Watching',
@@ -500,6 +501,7 @@ class _HomePageState extends State<HomePage> {
                   token: widget.session.token,
                   items: _continueWatching,
                   isLoading: _isLoadingContinueWatching,
+                  settings: widget.settings,
                 ),
                 for (final view
                     in _libraryViews.whereType<Map<String, dynamic>>())
@@ -511,6 +513,7 @@ class _HomePageState extends State<HomePage> {
                       token: widget.session.token,
                       items: _categoryItems[view['Id']] ?? const [],
                       isLoading: _loadingCategoryIds.contains(view['Id']),
+                      settings: widget.settings,
                     ),
               ],
             )
@@ -520,6 +523,7 @@ class _HomePageState extends State<HomePage> {
               userId: widget.session.userId,
               token: widget.session.token,
               isLoading: _isLoadingSelectedCategory,
+              settings: widget.settings,
             ),
     );
   }
@@ -600,12 +604,14 @@ class _CategoryGrid extends StatelessWidget {
     required this.userId,
     required this.token,
     required this.isLoading,
+    required this.settings,
   });
   final List<dynamic> items;
   final String serverUrl;
   final String userId;
   final String token;
   final bool isLoading;
+  final SettingsController settings;
 
   @override
   Widget build(BuildContext context) {
@@ -634,6 +640,7 @@ class _CategoryGrid extends StatelessWidget {
           userId: userId,
           token: token,
           fill: true,
+          settings: settings,
         ),
       ),
     );
@@ -677,11 +684,13 @@ class _HeroCarousel extends StatefulWidget {
     required this.serverUrl,
     required this.userId,
     required this.token,
+    required this.settings,
   });
   final List<dynamic> items;
   final String serverUrl;
   final String userId;
   final String token;
+  final SettingsController settings;
 
   @override
   State<_HeroCarousel> createState() => _HeroCarouselState();
@@ -732,6 +741,7 @@ class _HeroCarouselState extends State<_HeroCarousel> {
               serverUrl: widget.serverUrl,
               userId: widget.userId,
               token: widget.token,
+              settings: widget.settings,
             ),
           ),
           if (items.length > 1)
@@ -767,11 +777,13 @@ class _HeroCard extends StatelessWidget {
     required this.serverUrl,
     required this.userId,
     required this.token,
+    required this.settings,
   });
   final Map<String, dynamic> item;
   final String serverUrl;
   final String userId;
   final String token;
+  final SettingsController settings;
 
   @override
   Widget build(BuildContext context) {
@@ -801,6 +813,7 @@ class _HeroCard extends StatelessWidget {
                   userId: userId,
                   token: token,
                   itemId: itemId,
+                  settings: settings,
                 ),
               ),
             ),
@@ -868,6 +881,7 @@ class _HeroCard extends StatelessWidget {
                               userId: userId,
                               token: token,
                               itemId: itemId!,
+                              settings: settings,
                             ),
                           ),
                         ),
@@ -893,6 +907,7 @@ class _MediaRow extends StatelessWidget {
     required this.token,
     required this.items,
     required this.isLoading,
+    required this.settings,
   });
   final String title;
   final String serverUrl;
@@ -900,6 +915,7 @@ class _MediaRow extends StatelessWidget {
   final String token;
   final List<dynamic> items;
   final bool isLoading;
+  final SettingsController settings;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -934,6 +950,7 @@ class _MediaRow extends StatelessWidget {
                     serverUrl: serverUrl,
                     userId: userId,
                     token: token,
+                    settings: settings,
                   ),
                 ),
         ),
@@ -980,12 +997,14 @@ class _MediaPoster extends StatelessWidget {
     required this.serverUrl,
     required this.userId,
     required this.token,
+    required this.settings,
     this.fill = false,
   });
   final dynamic item;
   final String serverUrl;
   final String userId;
   final String token;
+  final SettingsController settings;
   final bool fill;
 
   @override
@@ -1056,6 +1075,7 @@ class _MediaPoster extends StatelessWidget {
                   userId: userId,
                   token: token,
                   itemId: navigableId,
+                  settings: settings,
                 ),
               ),
             ),

@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'services/jellyfin_api_service.dart';
+import 'settings_controller.dart';
 
 enum StreamQuality { original, high, medium, low }
 
@@ -39,6 +40,7 @@ class PlayerScreen extends StatefulWidget {
     this.subtitle,
     this.onNext,
     this.isAudioOnly = false,
+    required this.settings,
   });
   final String title;
   final String? subtitle;
@@ -49,6 +51,7 @@ class PlayerScreen extends StatefulWidget {
   final Duration startPosition;
   final VoidCallback? onNext;
   final bool isAudioOnly;
+  final SettingsController settings;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -60,7 +63,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   late final VideoController _controller;
   String? _error;
   List<dynamic> _jellyfinStreams = const [];
-  StreamQuality _quality = StreamQuality.original;
+  late StreamQuality _quality = switch (widget.settings.defaultQuality) {
+    'high' => StreamQuality.high,
+    'medium' => StreamQuality.medium,
+    'low' => StreamQuality.low,
+    _ => StreamQuality.original,
+  };
   int? _subtitleStreamIndex;
   double _speed = 1.0;
   bool _locked = false;
@@ -351,7 +359,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         child: _TopBar(onBack: () => Navigator.of(context).pop(), onSettings: _openSettings, onToggleSubtitles: _subtitleTracks.isEmpty ? null : _toggleSubtitles, subtitlesOn: _subtitleStreamIndex != null),
                       ),
                     if (_controlsVisible && !_locked)
-                      _CenterControls(player: _player, onSeekBack: () => _seekBy(const Duration(seconds: -15)), onSeekForward: () => _seekBy(const Duration(seconds: 15))),
+                      _CenterControls(player: _player, skipSeconds: widget.settings.skipSeconds, onSeekBack: () => _seekBy(Duration(seconds: -widget.settings.skipSeconds)), onSeekForward: () => _seekBy(Duration(seconds: widget.settings.skipSeconds))),
                     if (_controlsVisible && !_locked)
                       _BottomBar(player: _player, title: widget.title, subtitle: widget.subtitle, speed: _speed, onCycleSpeed: _cycleSpeed, onLock: _toggleLock, onNext: widget.onNext),
                     if (_locked)
@@ -395,8 +403,9 @@ class _TopBar extends StatelessWidget {
 }
 
 class _CenterControls extends StatelessWidget {
-  const _CenterControls({required this.player, required this.onSeekBack, required this.onSeekForward});
+  const _CenterControls({required this.player, required this.skipSeconds, required this.onSeekBack, required this.onSeekForward});
   final Player player;
+  final int skipSeconds;
   final VoidCallback onSeekBack;
   final VoidCallback onSeekForward;
 
@@ -408,7 +417,7 @@ class _CenterControls extends StatelessWidget {
           builder: (context, snapshot) {
             final playing = snapshot.data ?? false;
             return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              IconButton(iconSize: 40, onPressed: onSeekBack, icon: const _SeekIcon(forward: false)),
+              IconButton(iconSize: 40, onPressed: onSeekBack, icon: _SeekIcon(forward: false, seconds: skipSeconds)),
               const SizedBox(width: 24),
               IconButton(
                 iconSize: 64,
@@ -416,7 +425,7 @@ class _CenterControls extends StatelessWidget {
                 icon: Icon(playing ? Icons.pause_circle_filled : Icons.play_circle_filled, color: Colors.white),
               ),
               const SizedBox(width: 24),
-              IconButton(iconSize: 40, onPressed: onSeekForward, icon: const _SeekIcon(forward: true)),
+              IconButton(iconSize: 40, onPressed: onSeekForward, icon: _SeekIcon(forward: true, seconds: skipSeconds)),
             ]);
           },
         ),
@@ -424,15 +433,16 @@ class _CenterControls extends StatelessWidget {
 }
 
 class _SeekIcon extends StatelessWidget {
-  const _SeekIcon({required this.forward});
+  const _SeekIcon({required this.forward, required this.seconds});
   final bool forward;
+  final int seconds;
 
   @override
   Widget build(BuildContext context) => Stack(
         alignment: Alignment.center,
         children: [
           Transform.flip(flipX: forward, child: const Icon(Icons.replay, color: Colors.white, size: 40)),
-          const Padding(padding: EdgeInsets.only(top: 2), child: Text('15', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700))),
+          Padding(padding: const EdgeInsets.only(top: 2), child: Text('$seconds', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700))),
         ],
       );
 }

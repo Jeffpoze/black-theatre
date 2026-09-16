@@ -6,13 +6,15 @@ import 'package:flutter/material.dart';
 
 import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
+import 'settings_controller.dart';
 
 class DetailScreen extends StatefulWidget {
-  const DetailScreen({super.key, required this.serverUrl, required this.userId, required this.token, required this.itemId});
+  const DetailScreen({super.key, required this.serverUrl, required this.userId, required this.token, required this.itemId, required this.settings});
   final String serverUrl;
   final String userId;
   final String token;
   final String itemId;
+  final SettingsController settings;
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
@@ -118,7 +120,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   void _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false, bool isAudioOnly = false}) {
     final route = MaterialPageRoute<void>(
-      builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext, isAudioOnly: isAudioOnly),
+      builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext, isAudioOnly: isAudioOnly, settings: widget.settings),
     );
     if (replace) {
       Navigator.of(context).pushReplacement(route);
