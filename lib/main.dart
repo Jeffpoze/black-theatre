@@ -1,24 +1,42 @@
 // ignore_for_file: avoid_print
 
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calendar_screen.dart';
+import 'detail_screen.dart';
+import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
 import 'settings_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   final settings = SettingsController();
   await settings.load();
-  runApp(BlackTheatreTvApp(settings: settings));
+  final savedSession = await _loadSavedSession();
+  runApp(BlackTheatreTvApp(settings: settings, initialSession: savedSession));
+}
+
+Future<JellyfinSession?> _loadSavedSession() async {
+  final prefs = await SharedPreferences.getInstance();
+  final serverUrl = prefs.getString('serverUrl');
+  final userId = prefs.getString('userId');
+  final token = prefs.getString('accessToken');
+  final username = prefs.getString('username');
+  if (serverUrl == null || userId == null || token == null || username == null) return null;
+  return JellyfinSession(serverUrl: serverUrl, userId: userId, token: token, username: username);
 }
 
 class BlackTheatreTvApp extends StatelessWidget {
-  const BlackTheatreTvApp({super.key, required this.settings});
+  const BlackTheatreTvApp({super.key, required this.settings, this.initialSession});
   final SettingsController settings;
+  final JellyfinSession? initialSession;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +61,7 @@ class BlackTheatreTvApp extends StatelessWidget {
           textTheme: ThemeData.dark().textTheme.apply(bodyColor: Colors.white, displayColor: Colors.white),
           filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(backgroundColor: settings.accentColor, foregroundColor: Colors.white)),
         ),
-        home: AuthenticationScreen(settings: settings),
+        home: initialSession != null ? HomePage(session: initialSession!, settings: settings) : AuthenticationScreen(settings: settings),
       ),
     );
   }
@@ -62,6 +80,7 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
   final _passwordController = TextEditingController();
   final _api = JellyfinApiService();
   bool _isLoading = false;
+  bool _rememberMe = true;
   String? _error;
 
   Future<void> _signIn() async {
@@ -69,9 +88,17 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
     try {
       final session = await _api.login(serverUrl: _serverController.text, username: _usernameController.text, password: _passwordController.text);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('serverUrl', session.serverUrl);
-      await prefs.setString('userId', session.userId);
-      await prefs.setString('accessToken', session.token);
+      if (_rememberMe) {
+        await prefs.setString('serverUrl', session.serverUrl);
+        await prefs.setString('userId', session.userId);
+        await prefs.setString('accessToken', session.token);
+        await prefs.setString('username', session.username);
+      } else {
+        await prefs.remove('serverUrl');
+        await prefs.remove('userId');
+        await prefs.remove('accessToken');
+        await prefs.remove('username');
+      }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => HomePage(session: session, settings: widget.settings)));
     } catch (_) {
@@ -100,6 +127,15 @@ class _AuthenticationScreenState extends State<AuthenticationScreen> {
                 TextField(controller: _usernameController, decoration: const InputDecoration(labelText: 'Username')),
                 const SizedBox(height: 14),
                 TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password')),
+                const SizedBox(height: 4),
+                CheckboxListTile(
+                  value: _rememberMe,
+                  onChanged: (value) => setState(() => _rememberMe = value ?? true),
+                  title: const Text('Remember me'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                ),
                 if (_error != null) ...[const SizedBox(height: 16), Text(_error!, style: const TextStyle(color: Color(0xFFFF8A80)))],
                 const SizedBox(height: 24),
                 SizedBox(height: 52, child: FilledButton(onPressed: _isLoading ? null : _signIn, child: _isLoading ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Sign In'))),
@@ -124,6 +160,7 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> _continueWatching = const [];
   List<dynamic> _libraryViews = const [];
   Map<String, List<dynamic>> _categoryItems = {};
+  List<dynamic> _featuredItems = const [];
   String? _selectedCategoryId;
   bool _isLoadingHome = true;
   List<dynamic> _selectedCategoryItems = const [];
@@ -139,9 +176,11 @@ class _HomePageState extends State<HomePage> {
     final results = await Future.wait([
       _loadSection('continue watching', () => _api.getContinueWatching(widget.session.serverUrl, widget.session.userId, widget.session.token)),
       _loadSection('library views', () => _api.getLibraryViews(widget.session.serverUrl, widget.session.userId, widget.session.token)),
+      _loadSection('featured items', () => _api.getFeaturedItems(widget.session.serverUrl, widget.session.userId, widget.session.token)),
     ]);
     final continueWatching = results[0];
     final libraryViews = results[1];
+    final featuredItems = results[2];
 
     final categoryIds = libraryViews.whereType<Map<String, dynamic>>().map((view) => view['Id'] as String?).whereType<String>().toList();
     final categoryResults = await Future.wait(categoryIds.map(
@@ -152,6 +191,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _continueWatching = continueWatching;
       _libraryViews = libraryViews;
+      _featuredItems = featuredItems;
       _categoryItems = Map.fromIterables(categoryIds, categoryResults);
       _isLoadingHome = false;
     });
@@ -192,7 +232,7 @@ class _HomePageState extends State<HomePage> {
 
   void _openSettings() {
     Navigator.of(context).pop();
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(settings: widget.settings)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(settings: widget.settings, session: widget.session)));
   }
 
   void _openCalendar() {
@@ -225,20 +265,23 @@ class _HomePageState extends State<HomePage> {
           ? ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: [
-                const _HeroPlaceholder(),
-                _MediaRow(title: 'Continue Watching', serverUrl: widget.session.serverUrl, token: widget.session.token, items: _continueWatching, isLoading: _isLoadingHome),
+                _isLoadingHome
+                    ? const _HeroPlaceholder()
+                    : _HeroCarousel(items: _featuredItems, serverUrl: widget.session.serverUrl, userId: widget.session.userId, token: widget.session.token),
+                _MediaRow(title: 'Continue Watching', serverUrl: widget.session.serverUrl, userId: widget.session.userId, token: widget.session.token, items: _continueWatching, isLoading: _isLoadingHome),
                 for (final view in _libraryViews.whereType<Map<String, dynamic>>())
                   if (view['Id'] is String)
                     _MediaRow(
                       title: (view['Name'] as String?) ?? 'Library',
                       serverUrl: widget.session.serverUrl,
+                      userId: widget.session.userId,
                       token: widget.session.token,
                       items: _categoryItems[view['Id']] ?? const [],
                       isLoading: _isLoadingHome,
                     ),
               ],
             )
-          : _CategoryGrid(items: _selectedCategoryItems, serverUrl: widget.session.serverUrl, token: widget.session.token, isLoading: _isLoadingSelectedCategory),
+          : _CategoryGrid(items: _selectedCategoryItems, serverUrl: widget.session.serverUrl, userId: widget.session.userId, token: widget.session.token, isLoading: _isLoadingSelectedCategory),
     );
   }
 }
@@ -285,9 +328,10 @@ class _CategoryDrawer extends StatelessWidget {
 }
 
 class _CategoryGrid extends StatelessWidget {
-  const _CategoryGrid({required this.items, required this.serverUrl, required this.token, required this.isLoading});
+  const _CategoryGrid({required this.items, required this.serverUrl, required this.userId, required this.token, required this.isLoading});
   final List<dynamic> items;
   final String serverUrl;
+  final String userId;
   final String token;
   final bool isLoading;
 
@@ -299,7 +343,7 @@ class _CategoryGrid extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, mainAxisSpacing: 16, crossAxisSpacing: 12, childAspectRatio: 0.66),
       itemCount: items.length,
-      itemBuilder: (_, index) => ClipRRect(borderRadius: BorderRadius.circular(6), child: _MediaPoster(item: items[index], serverUrl: serverUrl, token: token, fill: true)),
+      itemBuilder: (_, index) => ClipRRect(borderRadius: BorderRadius.circular(6), child: _MediaPoster(item: items[index], serverUrl: serverUrl, userId: userId, token: token, fill: true)),
     );
   }
 }
@@ -315,10 +359,143 @@ class _HeroPlaceholder extends StatelessWidget {
       );
 }
 
+class _HeroCarousel extends StatefulWidget {
+  const _HeroCarousel({required this.items, required this.serverUrl, required this.userId, required this.token});
+  final List<dynamic> items;
+  final String serverUrl;
+  final String userId;
+  final String token;
+
+  @override
+  State<_HeroCarousel> createState() => _HeroCarouselState();
+}
+
+class _HeroCarouselState extends State<_HeroCarousel> {
+  final _controller = PageController();
+  Timer? _timer;
+  int _page = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.items.length > 1) {
+      _timer = Timer.periodic(const Duration(seconds: 7), (_) {
+        if (!mounted) return;
+        final next = (_page + 1) % widget.items.length;
+        _controller.animateToPage(next, duration: const Duration(milliseconds: 500), curve: Curves.easeInOut);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.items.whereType<Map<String, dynamic>>().toList();
+    if (items.isEmpty) return const _HeroPlaceholder();
+    return SizedBox(
+      height: 390,
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _controller,
+            itemCount: items.length,
+            onPageChanged: (index) => setState(() => _page = index),
+            itemBuilder: (context, index) => _HeroCard(item: items[index], serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token),
+          ),
+          if (items.length > 1)
+            Positioned(
+              bottom: 12,
+              left: 0,
+              right: 0,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var i = 0; i < items.length; i++)
+                    Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: i == _page ? Colors.white : Colors.white30),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({required this.item, required this.serverUrl, required this.userId, required this.token});
+  final Map<String, dynamic> item;
+  final String serverUrl;
+  final String userId;
+  final String token;
+
+  @override
+  Widget build(BuildContext context) {
+    final itemId = item['Id'] as String?;
+    final name = item['Name'] as String? ?? 'Untitled';
+    final overview = item['Overview'] as String?;
+    final backdropTag = (item['BackdropImageTags'] as List<dynamic>?)?.whereType<String>().firstOrNull;
+    final backdropUrl = itemId != null && backdropTag != null ? JellyfinApiService.getBackdropUrl(serverUrl, itemId, imageTag: backdropTag) : null;
+    final isMovie = item['Type'] == 'Movie';
+
+    return GestureDetector(
+      onTap: itemId == null ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DetailScreen(serverUrl: serverUrl, userId: userId, token: token, itemId: itemId))),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), color: const Color(0xFF181A1E)),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (backdropUrl != null) CachedNetworkImage(imageUrl: backdropUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover),
+            const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF090A0C)]))),
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 44,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                  if (overview != null) ...[
+                    const SizedBox(height: 6),
+                    Text(overview, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFCACBCF))),
+                  ],
+                  const SizedBox(height: 14),
+                  if (isMovie)
+                    SizedBox(
+                      height: 40,
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerScreen(title: name, serverUrl: serverUrl, userId: userId, token: token, itemId: itemId!))),
+                        icon: const Icon(Icons.play_arrow, size: 20),
+                        label: const Text('Play'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MediaRow extends StatelessWidget {
-  const _MediaRow({required this.title, required this.serverUrl, required this.token, required this.items, required this.isLoading});
+  const _MediaRow({required this.title, required this.serverUrl, required this.userId, required this.token, required this.items, required this.isLoading});
   final String title;
   final String serverUrl;
+  final String userId;
   final String token;
   final List<dynamic> items;
   final bool isLoading;
@@ -329,7 +506,7 @@ class _MediaRow extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700))),
           const SizedBox(height: 12),
-          SizedBox(height: 190, child: isLoading || items.isEmpty ? ListView.separated(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: 5, separatorBuilder: (_, _) => const SizedBox(width: 12), itemBuilder: (_, index) => _PosterPlaceholder(index: index)) : ListView.builder(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: items.length, itemBuilder: (_, index) => _MediaPoster(item: items[index], serverUrl: serverUrl, token: token))),
+          SizedBox(height: 246, child: isLoading || items.isEmpty ? ListView.separated(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: 5, separatorBuilder: (_, _) => const SizedBox(width: 12), itemBuilder: (_, index) => _PosterPlaceholder(index: index)) : ListView.builder(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: items.length, itemBuilder: (_, index) => _MediaPoster(item: items[index], serverUrl: serverUrl, userId: userId, token: token))),
         ]),
       );
 }
@@ -338,13 +515,26 @@ class _PosterPlaceholder extends StatelessWidget {
   const _PosterPlaceholder({required this.index});
   final int index;
   @override
-  Widget build(BuildContext context) => Container(width: 132, decoration: BoxDecoration(color: Color(0xFF17191D + (index * 0x020202)), borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.movie_outlined, color: Colors.white24, size: 32));
+  Widget build(BuildContext context) => SizedBox(
+        width: 132,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          AspectRatio(
+            aspectRatio: 2 / 3,
+            child: Container(decoration: BoxDecoration(color: Color(0xFF17191D + (index * 0x020202)), borderRadius: BorderRadius.circular(6)), child: const Icon(Icons.movie_outlined, color: Colors.white24, size: 32)),
+          ),
+          const SizedBox(height: 8),
+          Container(height: 12, width: 96, color: const Color(0xFF17191D)),
+          const SizedBox(height: 6),
+          Container(height: 10, width: 60, color: const Color(0xFF17191D)),
+        ]),
+      );
 }
 
 class _MediaPoster extends StatelessWidget {
-  const _MediaPoster({required this.item, required this.serverUrl, required this.token, this.fill = false});
+  const _MediaPoster({required this.item, required this.serverUrl, required this.userId, required this.token, this.fill = false});
   final dynamic item;
   final String serverUrl;
+  final String userId;
   final String token;
   final bool fill;
 
@@ -352,25 +542,98 @@ class _MediaPoster extends StatelessWidget {
   Widget build(BuildContext context) {
     if (item is! Map<String, dynamic>) return _DarkPosterPlaceholder(fill: fill);
     final (posterItemId, imageTag) = _posterImage(item);
+    final Widget content;
     if (posterItemId == null || imageTag == null || imageTag.isEmpty) {
-      return _DarkPosterPlaceholder(fill: fill);
+      content = _DarkPosterPlaceholder(fill: fill);
+    } else {
+      final imageUrl = JellyfinApiService.getImageUrl(serverUrl, posterItemId, imageTag: imageTag);
+      content = ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: CachedNetworkImage(
+          imageUrl: imageUrl,
+          httpHeaders: JellyfinApiService.authHeaders(token),
+          fit: BoxFit.cover,
+          placeholder: (_, _) => _DarkPosterPlaceholder(fill: fill),
+          errorWidget: (_, _, _) => _DarkPosterPlaceholder(fill: fill),
+        ),
+      );
     }
-    final imageUrl = JellyfinApiService.getImageUrl(serverUrl, posterItemId, imageTag: imageTag);
-    final image = ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: CachedNetworkImage(
-        imageUrl: imageUrl,
-        httpHeaders: JellyfinApiService.authHeaders(token),
-        fit: BoxFit.cover,
-        placeholder: (_, _) => _DarkPosterPlaceholder(fill: fill),
-        errorWidget: (_, _, _) => _DarkPosterPlaceholder(fill: fill),
-      ),
+
+    final navigableId = _navigableItemId(item);
+    final unwatchedCount = _unwatchedCount(item);
+    final badged = Stack(
+      children: [
+        Positioned.fill(child: content),
+        if (unwatchedCount != null && unwatchedCount > 0)
+          Positioned(
+            right: 6,
+            top: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              constraints: const BoxConstraints(minWidth: 20),
+              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(10)),
+              child: Text('$unwatchedCount', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
+          ),
+      ],
     );
-    if (fill) return image;
-    return Padding(padding: const EdgeInsets.only(right: 12), child: SizedBox(width: 132, child: image));
+    final poster = AspectRatio(aspectRatio: 2 / 3, child: badged);
+    final tappable = GestureDetector(
+      onTap: navigableId == null
+          ? null
+          : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => DetailScreen(serverUrl: serverUrl, userId: userId, token: token, itemId: navigableId))),
+      child: fill
+          ? poster
+          : Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              poster,
+              const SizedBox(height: 8),
+              Text(item['Name'] as String? ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              if (_yearInfo(item) != null) ...[
+                const SizedBox(height: 2),
+                Text(_yearInfo(item)!, style: const TextStyle(fontSize: 11, color: Color(0xFFA5A7AC))),
+              ],
+            ]),
+    );
+    if (fill) return tappable;
+    return Padding(padding: const EdgeInsets.only(right: 12), child: SizedBox(width: 132, child: tappable));
+  }
+
+  String? _yearInfo(Map<String, dynamic> item) {
+    final year = item['ProductionYear'];
+    if (year == null) return null;
+    if (item['Type'] == 'Series') {
+      final status = item['Status'] as String?;
+      final endDate = item['EndDate'] as String?;
+      if (status != 'Continuing' && endDate is String) {
+        final endYear = DateTime.tryParse(endDate)?.year;
+        if (endYear != null) return '$year - $endYear';
+      }
+      return '$year - Present';
+    }
+    return '$year';
+  }
+
+  int? _unwatchedCount(Map<String, dynamic> item) {
+    if (item['Type'] != 'Series') return null;
+    final userData = item['UserData'];
+    if (userData is! Map) return null;
+    final count = userData['UnplayedItemCount'];
+    return count is num ? count.toInt() : null;
+  }
+
+  String? _navigableItemId(Map<String, dynamic> item) {
+    if (item['Type'] == 'Episode') return item['SeriesId'] as String?;
+    return item['Id'] as String?;
   }
 
   (String?, String?) _posterImage(Map<String, dynamic> item) {
+    // Episodes carry their own screenshot as PrimaryImageTag, but browsing rows
+    // should show the show's poster, not a random episode still.
+    if (item['Type'] == 'Episode') {
+      final seriesTag = item['SeriesPrimaryImageTag'];
+      final seriesId = item['SeriesId'];
+      if (seriesTag is String && seriesTag.isNotEmpty && seriesId is String) return (seriesId, seriesTag);
+    }
     final itemId = item['Id'] as String?;
     final primaryTag = item['PrimaryImageTag'];
     if (primaryTag is String && primaryTag.isNotEmpty) return (itemId, primaryTag);
@@ -379,6 +642,10 @@ class _MediaPoster extends StatelessWidget {
     final seriesTag = item['SeriesPrimaryImageTag'];
     final seriesId = item['SeriesId'];
     if (seriesTag is String && seriesTag.isNotEmpty && seriesId is String) return (seriesId, seriesTag);
+    // Audio tracks usually carry no image of their own; fall back to the album's art.
+    final albumTag = item['AlbumPrimaryImageTag'];
+    final albumId = item['AlbumId'];
+    if (albumTag is String && albumTag.isNotEmpty && albumId is String) return (albumId, albumTag);
     return (null, null);
   }
 }

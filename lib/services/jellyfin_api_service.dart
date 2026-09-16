@@ -6,16 +6,36 @@ import 'package:http/http.dart' as http;
 
 import '../settings_controller.dart';
 
+/// Converts Jellyfin's tick-based playback position (100ns units) to a [Duration].
+Duration ticksToDuration(dynamic ticks) => Duration(microseconds: ((ticks as num?) ?? 0).toInt() ~/ 10);
+
 class JellyfinSession {
-  const JellyfinSession({required this.serverUrl, required this.userId, required this.token});
+  const JellyfinSession({required this.serverUrl, required this.userId, required this.token, required this.username, this.isAdministrator = false});
 
   final String serverUrl;
   final String userId;
   final String token;
+  final String username;
+  final bool isAdministrator;
+}
+
+// A slow or overloaded Jellyfin server can otherwise leave a request pending
+// forever, which stalls the whole homepage (it awaits every section before
+// showing anything). Bound every request so a stuck one fails fast instead.
+class _TimeoutHttpClient extends http.BaseClient {
+  _TimeoutHttpClient(this._inner, this._timeout);
+  final http.Client _inner;
+  final Duration _timeout;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) => _inner.send(request).timeout(_timeout);
+
+  @override
+  void close() => _inner.close();
 }
 
 class JellyfinApiService {
-  JellyfinApiService({http.Client? client}) : _client = client ?? http.Client();
+  JellyfinApiService({http.Client? client}) : _client = _TimeoutHttpClient(client ?? http.Client(), const Duration(seconds: 30));
 
   final http.Client _client;
 
@@ -28,6 +48,33 @@ class JellyfinApiService {
   }
 
   static String authorizationHeader(String token) => 'MediaBrowser $_clientIdentity, Token="$token"';
+
+  static String getBackdropUrl(String serverUrl, String itemId, {String? imageTag}) {
+    final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
+    final tagParam = imageTag != null ? '&tag=$imageTag' : '';
+    return '$cleanUrl/Items/$itemId/Images/Backdrop?quality=90$tagParam';
+  }
+
+  /// Text-based subtitle codecs Jellyfin can embed as a WebVTT HLS rendition
+  /// without re-encoding video. Anything else (e.g. PGS/VOBSUB image subs)
+  /// needs to be burned into the video instead.
+  static const _textSubtitleCodecs = {'subrip', 'srt', 'ass', 'ssa', 'vtt', 'webvtt', 'mov_text'};
+
+  static String subtitleMethodFor(String? codec) => codec != null && _textSubtitleCodecs.contains(codec.toLowerCase()) ? 'Hls' : 'Encode';
+
+  static String getStreamUrl(String serverUrl, String itemId, String token, {int? maxBitrateBps, int? subtitleStreamIndex, String? subtitleMethod}) {
+    final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
+    final params = <String, String>{
+      'api_key': token,
+      'MediaSourceId': itemId,
+      'VideoCodec': 'h264',
+      'AudioCodec': 'aac',
+      if (maxBitrateBps != null) 'VideoBitrate': '$maxBitrateBps',
+      if (subtitleStreamIndex != null) ...{'SubtitleStreamIndex': '$subtitleStreamIndex', 'SubtitleMethod': subtitleMethod ?? 'Hls'},
+    };
+    final query = params.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}').join('&');
+    return '$cleanUrl/Videos/$itemId/master.m3u8?$query';
+  }
 
   static Map<String, String> authHeaders(String token) {
     final value = authorizationHeader(token);
@@ -56,19 +103,39 @@ class JellyfinApiService {
         throw Exception('Unable to sign in.');
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return JellyfinSession(serverUrl: cleanServerUrl, userId: data['User']['Id'] as String, token: data['AccessToken'] as String);
+      final user = data['User'] as Map<String, dynamic>;
+      final policy = user['Policy'] as Map<String, dynamic>?;
+      return JellyfinSession(
+        serverUrl: cleanServerUrl,
+        userId: user['Id'] as String,
+        token: data['AccessToken'] as String,
+        username: user['Name'] as String,
+        isAdministrator: policy?['IsAdministrator'] == true,
+      );
     } catch (e) {
       print('login error: $e');
       rethrow;
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchHomeItems(JellyfinSession session) async {
-    final uri = Uri.parse('${session.serverUrl}/Users/${session.userId}/Items').replace(queryParameters: {'SortBy': 'PremiereDate', 'SortOrder': 'Descending', 'IncludeItemTypes': 'Movie,Series,Episode', 'Recursive': 'true', 'Limit': '40', 'Fields': 'Overview,PrimaryImageAspectRatio,PrimaryImageTag,PremiereDate,DateCreated'});
-    final response = await _client.get(uri, headers: authHeaders(session.token));
-    if (response.statusCode < 200 || response.statusCode >= 300) throw Exception('Unable to load your library.');
+  Future<List<dynamic>> getFeaturedItems(String serverUrl, String userId, String token) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(queryParameters: {
+      'SortBy': 'DateCreated',
+      'SortOrder': 'Descending',
+      'IncludeItemTypes': 'Movie,Series',
+      'Recursive': 'true',
+      'Limit': '10',
+      'Fields': 'Overview,BackdropImageTags,PrimaryImageTag,ProductionYear',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getFeaturedItems failed: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load featured items.');
+    }
     final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return (data['Items'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>().toList();
+    final items = (data['Items'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>();
+    return items.where((item) => (item['BackdropImageTags'] as List<dynamic>?)?.isNotEmpty == true).toList();
   }
 
   Future<List<dynamic>> getContinueWatching(String serverUrl, String userId, String token) {
@@ -85,7 +152,7 @@ class JellyfinApiService {
       'Recursive': 'true',
       'Filters': 'IsNotFolder',
       'Limit': '20',
-      'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,PremiereDate',
+      'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,AlbumPrimaryImageTag,AlbumId,PremiereDate,ProductionYear,EndDate,Status',
     });
     final response = await _client.get(uri, headers: authHeaders(token));
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -93,8 +160,79 @@ class JellyfinApiService {
       throw Exception('Unable to load recent items.');
     }
     final data = jsonDecode(response.body);
-    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
-    return const [];
+    final items = data is Map<String, dynamic> && data['Items'] is List<dynamic> ? data['Items'] as List<dynamic> : const [];
+    return _collapseToParentItems(items, serverUrl, userId, token);
+  }
+
+  // "Recently added" for a show/music library returns newly added episodes or
+  // tracks, not the shows/albums themselves. Collapse those down to one entry
+  // per series/album (using the parent's own poster/metadata) so the homepage
+  // rows read like a show/album list instead of a flat file list.
+  Future<List<dynamic>> _collapseToParentItems(List<dynamic> rawItems, String serverUrl, String userId, String token) async {
+    final ordered = <dynamic>[];
+    final seenParentIds = <String>{};
+    final parentIdsNeeded = <String>[];
+    final latestYearByParentId = <String, int>{};
+    for (final raw in rawItems) {
+      if (raw is! Map<String, dynamic>) continue;
+      final parentId = switch (raw['Type']) {
+        'Episode' => raw['SeriesId'] as String?,
+        'Audio' => raw['AlbumId'] as String?,
+        _ => null,
+      };
+      if (parentId == null) {
+        ordered.add(raw);
+        continue;
+      }
+      final rawYear = raw['ProductionYear'] as int? ?? DateTime.tryParse(raw['PremiereDate'] as String? ?? '')?.year;
+      if (rawYear != null) {
+        final current = latestYearByParentId[parentId];
+        if (current == null || rawYear > current) latestYearByParentId[parentId] = rawYear;
+      }
+      if (seenParentIds.contains(parentId)) continue;
+      seenParentIds.add(parentId);
+      parentIdsNeeded.add(parentId);
+      ordered.add(parentId);
+    }
+    if (parentIdsNeeded.isEmpty) return ordered;
+    // One batched request for all parents in this row, instead of one request per item.
+    final parentsById = await _getItemsByIds(serverUrl, userId, token, parentIdsNeeded);
+    // A show's recorded end date can lag behind reality (e.g. a metadata
+    // provider marking an anime "Ended" between seasons). If we just saw a
+    // newer episode than that recorded end date, treat the show as ongoing.
+    for (final id in parentIdsNeeded) {
+      final parent = parentsById[id];
+      final latestYear = latestYearByParentId[id];
+      if (parent == null || latestYear == null) continue;
+      final endYear = DateTime.tryParse(parent['EndDate'] as String? ?? '')?.year;
+      if (endYear != null && endYear < latestYear) {
+        parent.remove('EndDate');
+        parent['Status'] = 'Continuing';
+      }
+    }
+    return ordered.map((entry) {
+      if (entry is String) {
+        final parent = parentsById[entry];
+        return parent != null && parent.isNotEmpty ? parent : null;
+      }
+      return entry;
+    }).whereType<Map<String, dynamic>>().toList();
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _getItemsByIds(String serverUrl, String userId, String token, List<String> ids) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(queryParameters: {
+      'Ids': ids.join(','),
+      'Fields': 'PrimaryImageTag,ImageTags,ProductionYear,EndDate,Status',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('_getItemsByIds failed: ${response.statusCode} ${response.body}');
+      return {};
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (data['Items'] as List<dynamic>? ?? const []).whereType<Map<String, dynamic>>();
+    return {for (final item in items) if (item['Id'] is String) item['Id'] as String: item};
   }
 
   Future<List<dynamic>> getLibraryItems(String serverUrl, String userId, String token, String viewId, {required SortOption sort}) async {
@@ -106,7 +244,7 @@ class JellyfinApiService {
       'Recursive': 'true',
       'Filters': 'IsNotFolder',
       'Limit': '200',
-      'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,PremiereDate,CommunityRating',
+      'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,AlbumPrimaryImageTag,AlbumId,PremiereDate,ProductionYear,EndDate,Status,CommunityRating',
     });
     final response = await _client.get(uri, headers: authHeaders(token));
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -141,6 +279,101 @@ class JellyfinApiService {
     final items = data is Map<String, dynamic> && data['Items'] is List<dynamic> ? data['Items'] as List<dynamic> : const [];
     // MinPremiereDate should already exclude these, but guard against items with no known air date at all.
     return items.where((item) => item is Map<String, dynamic> && item['PremiereDate'] is String).toList();
+  }
+
+  Future<Map<String, dynamic>> getItemDetail(String serverUrl, String userId, String token, String itemId) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items/$itemId').replace(queryParameters: {
+      'Fields': 'Overview,Genres,Studios,People,PrimaryImageTag,ImageTags,BackdropImageTags,CommunityRating,OfficialRating,PremiereDate,ProductionYear,EndDate,Status,RunTimeTicks',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getItemDetail failed for $itemId: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load details.');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getSeasons(String serverUrl, String userId, String token, String seriesId) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Shows/$seriesId/Seasons').replace(queryParameters: {
+      'userId': userId,
+      'Fields': 'PrimaryImageTag,ImageTags',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getSeasons failed for $seriesId: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load seasons.');
+    }
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
+  Future<List<dynamic>> getEpisodes(String serverUrl, String userId, String token, String seriesId, {String? seasonId}) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Shows/$seriesId/Episodes').replace(queryParameters: {
+      'userId': userId,
+      'Fields': 'PrimaryImageTag,ImageTags,Overview,PremiereDate',
+      if (seasonId != null) 'SeasonId': seasonId,
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getEpisodes failed for $seriesId: ${response.statusCode} ${response.body}');
+      throw Exception('Unable to load episodes.');
+    }
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
+  Future<Map<String, dynamic>?> getNextUp(String serverUrl, String userId, String token, String seriesId) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Shows/NextUp').replace(queryParameters: {
+      'userId': userId,
+      'SeriesId': seriesId,
+      'Limit': '1',
+      'Fields': 'PrimaryImageTag,ImageTags,Overview,PremiereDate',
+    });
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getNextUp failed for $seriesId: ${response.statusCode} ${response.body}');
+      return null;
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (data['Items'] as List<dynamic>?)?.whereType<Map<String, dynamic>>();
+    return items == null || items.isEmpty ? null : items.first;
+  }
+
+  Future<List<dynamic>> getMediaStreams(String serverUrl, String userId, String token, String itemId) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Items/$itemId').replace(queryParameters: {'userId': userId, 'Fields': 'MediaStreams'});
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('getMediaStreams failed for $itemId: ${response.statusCode} ${response.body}');
+      return const [];
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final sources = data['MediaSources'] as List<dynamic>?;
+    if (sources != null && sources.isNotEmpty) {
+      final first = sources.first as Map<String, dynamic>;
+      return (first['MediaStreams'] as List<dynamic>?) ?? const [];
+    }
+    return const [];
+  }
+
+  Future<void> setFavorite(String serverUrl, String userId, String token, String itemId, bool favorite) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/FavoriteItems/$itemId');
+    final response = favorite ? await _client.post(uri, headers: authHeaders(token)) : await _client.delete(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) throw Exception('Unable to update favorite.');
+  }
+
+  Future<void> setWatched(String serverUrl, String userId, String token, String itemId, bool watched) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/PlayedItems/$itemId');
+    final response = watched ? await _client.post(uri, headers: authHeaders(token)) : await _client.delete(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) throw Exception('Unable to update watched status.');
   }
 
   Future<List<dynamic>> getLibraryViews(String serverUrl, String userId, String token) async {
