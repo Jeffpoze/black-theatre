@@ -85,6 +85,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _player = Player();
     _controller = VideoController(_player);
+    final platform = _player.platform;
+    if (platform is NativePlayer) {
+      // The Flutter texture mpv renders into isn't a real HDR-capable
+      // display, so mpv's own HDR-vs-SDR auto-detection can't tell it needs
+      // to tone-map — it passes raw PQ/HDR values straight through, which
+      // looks washed out and dull once displayed as if they were SDR. These
+      // are display/color-only settings (no effect on networking or
+      // demuxing), so this is much lower risk than the earlier reconnect
+      // property change.
+      platform.setProperty('tone-mapping', 'hable');
+      platform.setProperty('target-trc', 'bt1886');
+      platform.setProperty('target-prim', 'bt709');
+    }
     _player.stream.error.listen((error) {
       _lastKnownPosition = _player.state.position;
       if (mounted) setState(() => _error = error);
