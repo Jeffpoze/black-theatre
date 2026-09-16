@@ -15,7 +15,7 @@ class BlackTheatreTvApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const background = Color(0xFF090A0C);
     return MaterialApp(
-      title: 'Black Theatre TV',
+      title: 'Black Theatre',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: background,
