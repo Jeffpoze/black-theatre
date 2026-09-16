@@ -68,7 +68,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _hideTimer;
   StreamSubscription<bool>? _completedSub;
   Duration _lastKnownPosition = Duration.zero;
-  final String _playSessionId = '${DateTime.now().microsecondsSinceEpoch}';
+  String _playSessionId = '${DateTime.now().microsecondsSinceEpoch}';
 
   @override
   void initState() {
@@ -98,18 +98,42 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _openStream(position: widget.startPosition);
   }
 
-  void _openStream({required Duration position}) {
-    final url = widget.isAudioOnly
-        ? JellyfinApiService.getAudioStreamUrl(widget.serverUrl, widget.itemId, widget.userId, widget.token, maxBitrateBps: _quality.maxBitrateBps)
-        : JellyfinApiService.getStreamUrl(
-            widget.serverUrl,
-            widget.itemId,
-            widget.token,
-            maxBitrateBps: _quality.maxBitrateBps,
-            subtitleStreamIndex: _subtitleStreamIndex,
-            subtitleMethod: _subtitleStreamIndex == null ? null : JellyfinApiService.subtitleMethodFor(_subtitleCodec(_subtitleStreamIndex!)),
-            playSessionId: _playSessionId,
-          );
+  Future<void> _openStream({required Duration position}) async {
+    if (widget.isAudioOnly) {
+      final url = JellyfinApiService.getAudioStreamUrl(widget.serverUrl, widget.itemId, widget.userId, widget.token, maxBitrateBps: _quality.maxBitrateBps);
+      _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
+      if (_speed != 1.0) _player.setRate(_speed);
+      return;
+    }
+
+    // Only the plain "Original, no forced subtitle" case is eligible for
+    // direct-play negotiation. Quality caps and burned-in subtitles keep
+    // using the known-working forced-transcode request.
+    if (_quality == StreamQuality.original && _subtitleStreamIndex == null) {
+      try {
+        final playbackInfo = await _api.getPlaybackInfo(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+        final result = JellyfinApiService.buildUrlFromPlaybackInfo(widget.serverUrl, widget.itemId, widget.token, playbackInfo);
+        if (result != null) {
+          final (url, playSessionId) = result;
+          _playSessionId = playSessionId;
+          _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
+          if (_speed != 1.0) _player.setRate(_speed);
+          return;
+        }
+      } catch (e) {
+        print('getPlaybackInfo negotiation failed for ${widget.itemId}, falling back to forced transcode: $e');
+      }
+    }
+
+    final url = JellyfinApiService.getStreamUrl(
+      widget.serverUrl,
+      widget.itemId,
+      widget.token,
+      maxBitrateBps: _quality.maxBitrateBps,
+      subtitleStreamIndex: _subtitleStreamIndex,
+      subtitleMethod: _subtitleStreamIndex == null ? null : JellyfinApiService.subtitleMethodFor(_subtitleCodec(_subtitleStreamIndex!)),
+      playSessionId: _playSessionId,
+    );
     _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
     if (_speed != 1.0) _player.setRate(_speed);
   }

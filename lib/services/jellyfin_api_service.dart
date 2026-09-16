@@ -118,10 +118,10 @@ class JellyfinApiService {
       'api_key': token,
       'MediaSourceId': itemId,
       'PlaySessionId': ?playSessionId,
-      // Two attempts at avoiding a forced transcode for "Original" quality
-      // (omitting the codec params, then a broad codec list) both broke
-      // playback outright against this server. Back to the one known-working
-      // request shape until that's researched properly instead of guessed.
+      // This always transcodes, which is the fallback path used when
+      // PlaybackInfo negotiation (below) isn't in play or fails. Query
+      // params on this endpoint aren't how direct-play negotiation works —
+      // see getPlaybackInfo for the real mechanism.
       'VideoCodec': 'h264',
       'AudioCodec': 'aac',
       if (maxBitrateBps != null) 'VideoBitrate': '$maxBitrateBps',
@@ -134,6 +134,125 @@ class JellyfinApiService {
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&');
     return '$cleanUrl/Videos/$itemId/master.m3u8?$query';
+  }
+
+  // The real mechanism Jellyfin clients use to avoid an unnecessary
+  // transcode: post a DeviceProfile describing what the player can decode
+  // (modeled on Jellyfin's own official Swiftfin client's VLC/ffmpeg-backed
+  // profile, since media_kit is also ffmpeg-based) and let the server decide
+  // direct play vs. direct stream vs. transcode. The response hands back
+  // either a ready-made TranscodingUrl or the info needed to build a direct
+  // stream URL — never build codec query params by hand for this endpoint.
+  Future<Map<String, dynamic>> getPlaybackInfo(
+    String serverUrl,
+    String userId,
+    String token,
+    String itemId, {
+    int? maxBitrateBps,
+    int? audioStreamIndex,
+    int? subtitleStreamIndex,
+  }) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse(
+      '$cleanUrl/Items/$itemId/PlaybackInfo',
+    ).replace(queryParameters: {'UserId': userId});
+    const audioCodecs =
+        'aac,ac3,alac,amr_nb,amr_wb,dts,eac3,flac,mp1,mp2,mp3,nellymoser,opus,'
+        'pcm_alaw,pcm_bluray,pcm_dvd,pcm_mulaw,pcm_s16be,pcm_s16le,pcm_s24be,'
+        'pcm_s24le,pcm_u8,speex,vorbis,wavpack,wmalossless,wmapro,wmav1,wmav2';
+    final deviceProfile = {
+      if (maxBitrateBps != null) ...{
+        'MaxStreamingBitrate': maxBitrateBps,
+        'MaxStaticBitrate': maxBitrateBps,
+      },
+      'DirectPlayProfiles': [
+        {
+          'Type': 'Video',
+          'AudioCodec': audioCodecs,
+          'VideoCodec':
+              'av1,dirac,dv,ffv1,flv1,h261,h263,h264,hevc,mjpeg,mpeg1video,'
+              'mpeg2video,mpeg4,msmpeg4v1,msmpeg4v2,msmpeg4v3,prores,theora,'
+              'vc1,vp8,vp9,wmv1,wmv2,wmv3',
+        },
+        {'Type': 'Audio', 'AudioCodec': audioCodecs},
+      ],
+      'TranscodingProfiles': [
+        {
+          'Type': 'Video',
+          'Container': 'ts',
+          'Protocol': 'hls',
+          'AudioCodec': 'aac,ac3,alac,dts,eac3,flac,mp1,mp2,mp3,opus,vorbis',
+          'VideoCodec': 'h263,h264,hevc,mjpeg,mpeg1video,mpeg2video,mpeg4,vp9',
+          'Context': 'Streaming',
+          'MaxAudioChannels': '8',
+          'MinSegments': 2,
+          'BreakOnNonKeyFrames': true,
+        },
+      ],
+      'SubtitleProfiles': [
+        for (final format in ['ass', 'mov_text', 'srt', 'ssa', 'subrip', 'vtt'])
+          {'Format': format, 'Method': 'Embed'},
+        for (final format in ['dvbsub', 'dvdsub', 'pgssub'])
+          {'Format': format, 'Method': 'Encode'},
+      ],
+    };
+    final body = {
+      'UserId': userId,
+      'DeviceProfile': deviceProfile,
+      'AutoOpenLiveStream': true,
+      if (maxBitrateBps != null) 'MaxStreamingBitrate': maxBitrateBps,
+      if (audioStreamIndex != null) 'AudioStreamIndex': audioStreamIndex,
+      if (subtitleStreamIndex != null)
+        'SubtitleStreamIndex': subtitleStreamIndex,
+    };
+    final response = await _client.post(
+      uri,
+      headers: {...authHeaders(token), 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print(
+        'getPlaybackInfo failed for $itemId: ${response.statusCode} ${response.body}',
+      );
+      throw Exception('Unable to get playback info.');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  // Turns a PlaybackInfo response into a playable URL: use the server's own
+  // TranscodingUrl when it decided to transcode, otherwise build the direct
+  // (or direct-stream/remux) file URL ourselves.
+  static (String url, String playSessionId)? buildUrlFromPlaybackInfo(
+    String serverUrl,
+    String itemId,
+    String token,
+    Map<String, dynamic> playbackInfo,
+  ) {
+    final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
+    final playSessionId = playbackInfo['PlaySessionId'] as String?;
+    final sources = playbackInfo['MediaSources'] as List<dynamic>?;
+    if (playSessionId == null || sources == null || sources.isEmpty) {
+      return null;
+    }
+    final source = sources.first as Map<String, dynamic>;
+    final transcodingUrl = source['TranscodingUrl'] as String?;
+    if (transcodingUrl != null) {
+      final separator = transcodingUrl.contains('?') ? '&' : '?';
+      return ('$cleanUrl$transcodingUrl${separator}api_key=$token', playSessionId);
+    }
+    final mediaSourceId = source['Id'] as String? ?? itemId;
+    final tag = source['ETag'] as String?;
+    final params = <String, String>{
+      'api_key': token,
+      'Static': 'true',
+      'PlaySessionId': playSessionId,
+      'MediaSourceId': mediaSourceId,
+      'Tag': ?tag,
+    };
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    return ('$cleanUrl/Videos/$itemId/stream?$query', playSessionId);
   }
 
   // Jellyfin only tears down a transcode session's ffmpeg process once it's
