@@ -1,17 +1,51 @@
-# black_theatre_tv
+# Black Theatre
 
-A new Flutter project.
+A personal media client for a self-hosted Jellyfin server, for iOS and Android.
+
+## Features
+
+- Home screen with library-organized "recently added" rows, continue watching, and a featured carousel
+- Library browsing with sorting by release date, rating, or title
+- Movie/show detail pages with a season picker, horizontally scrolling episodes, cast & crew, and a resume-aware play button
+- Built-in video player with quality, audio track, and subtitle switching, 15-second skip, playback speed, and screen lock
+- Calendar of upcoming releases pulled from your library
+- Customizable accent color
+- Remember-me sign-in
 
 ## Getting Started
 
-This project is a starting point for a Flutter application.
+### Requirements
 
-A few resources to get you started if this is your first Flutter project:
+- A Jellyfin server reachable from your device
+- Xcode, for building and running on iOS
+- Android Studio's command-line tools, for building and running on Android
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+### Download
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- **Android**: grab the latest APK from the [Releases page](https://github.com/Jeffpoze/black-theatre/releases/tag/android-latest) and sideload it (you'll need to allow "install from unknown sources" on your device). A fresh build is published automatically on every push to `main`.
+- **iOS**: there's no public download yet — Apple's signing requirements mean it needs to be built and installed from source (see below).
+
+### Running from source
+
+```
+flutter pub get
+flutter run
+```
+
+On first launch, enter your Jellyfin server URL, username, and password.
+
+### Building a release
+
+```
+flutter build apk --release   # Android
+flutter build ios --release   # iOS, requires a Mac and Xcode
+```
+
+## Project layout
+
+- `lib/main.dart` — sign-in, home screen, library browsing
+- `lib/detail_screen.dart` — movie/show details, seasons, episodes, cast
+- `lib/player_screen.dart` — video playback
+- `lib/calendar_screen.dart` — upcoming releases
+- `lib/settings_screen.dart`, `lib/settings_controller.dart` — app preferences
+- `lib/services/jellyfin_api_service.dart` — Jellyfin API client
