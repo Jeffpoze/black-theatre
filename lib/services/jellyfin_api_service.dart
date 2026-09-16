@@ -42,18 +42,24 @@ class JellyfinApiService {
   static const _deviceId = 'c78432a9-816f-45b6-b510-123456789abc';
   static const _clientIdentity = 'Client="BlackTheatre", Device="iOS", DeviceId="$_deviceId", Version="1.0.0"';
 
-  static String getImageUrl(String serverUrl, String itemId, {String? imageTag}) {
+  // Requesting a size matching where the image is actually displayed (rather
+  // than whatever resolution the source art happens to be) is the single
+  // biggest lever for scroll smoothness and load time on a modest home
+  // server: fewer bytes over the wire and far cheaper decodes.
+  static String getImageUrl(String serverUrl, String itemId, {String? imageTag, int? maxWidth}) {
     final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
     final tagParam = imageTag != null ? '&tag=$imageTag' : '';
-    return '$cleanUrl/Items/$itemId/Images/Primary?quality=90$tagParam';
+    final widthParam = maxWidth != null ? '&maxWidth=$maxWidth' : '';
+    return '$cleanUrl/Items/$itemId/Images/Primary?quality=90$tagParam$widthParam';
   }
 
   static String authorizationHeader(String token) => 'MediaBrowser $_clientIdentity, Token="$token"';
 
-  static String getBackdropUrl(String serverUrl, String itemId, {String? imageTag}) {
+  static String getBackdropUrl(String serverUrl, String itemId, {String? imageTag, int? maxWidth}) {
     final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
     final tagParam = imageTag != null ? '&tag=$imageTag' : '';
-    return '$cleanUrl/Items/$itemId/Images/Backdrop?quality=90$tagParam';
+    final widthParam = maxWidth != null ? '&maxWidth=$maxWidth' : '';
+    return '$cleanUrl/Items/$itemId/Images/Backdrop?quality=90$tagParam$widthParam';
   }
 
   /// Text-based subtitle codecs Jellyfin can embed as a WebVTT HLS rendition

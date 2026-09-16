@@ -116,7 +116,7 @@ class _UpcomingRow extends StatelessWidget {
         : 'Movie';
 
     final (posterId, tag) = _posterImage(item);
-    final imageUrl = posterId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, posterId, imageTag: tag) : null;
+    final imageUrl = posterId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, posterId, imageTag: tag, maxWidth: 170) : null;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -133,6 +133,7 @@ class _UpcomingRow extends StatelessWidget {
                       imageUrl: imageUrl,
                       httpHeaders: JellyfinApiService.authHeaders(token),
                       fit: BoxFit.cover,
+                      memCacheWidth: 170,
                       placeholder: (_, _) => const ColoredBox(color: Color(0xFF17191D)),
                       errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF17191D), child: Icon(Icons.movie_outlined, color: Colors.white24)),
                     ),

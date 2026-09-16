@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
@@ -223,34 +225,55 @@ class _DetailScreenState extends State<DetailScreen> {
     final studios = (item['Studios'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().map((s) => s['Name'] as String?).whereType<String>().join(', ');
     final cast = (item['People'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().where((p) => p['Type'] == 'Actor').toList() ?? const [];
     final backdropTag = (item['BackdropImageTags'] as List<dynamic>?)?.whereType<String>().firstOrNull;
-    final backdropUrl = backdropTag != null ? JellyfinApiService.getBackdropUrl(widget.serverUrl, widget.itemId, imageTag: backdropTag) : null;
+    final backdropUrl = backdropTag != null ? JellyfinApiService.getBackdropUrl(widget.serverUrl, widget.itemId, imageTag: backdropTag, maxWidth: 1200) : null;
     final isSeries = item['Type'] == 'Series';
     final isContainer = !isSeries && item['IsFolder'] == true;
     final canPlay = isSeries ? (_nextUp != null || _seasonEpisodes.isNotEmpty) : (isContainer ? _tracks.isNotEmpty : true);
     final selectedSeasonName = _seasons.whereType<Map<String, dynamic>>().firstWhere((s) => s['Id'] == _selectedSeasonId, orElse: () => const {})['Name'] as String?;
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 320,
-            pinned: true,
-            backgroundColor: const Color(0xFF090A0C),
-            flexibleSpace: FlexibleSpaceBar(
-              background: backdropUrl == null
-                  ? const ColoredBox(color: Color(0xFF181A1E))
-                  : Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        CachedNetworkImage(imageUrl: backdropUrl, httpHeaders: JellyfinApiService.authHeaders(widget.token), fit: BoxFit.cover),
-                        const DecoratedBox(
-                          decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF090A0C)])),
-                        ),
-                      ],
-                    ),
+      backgroundColor: const Color(0xFF090A0C),
+      body: Stack(
+        children: [
+          // A softly blurred, dimmed backdrop behind the whole page so the
+          // content feels like an extension of the artwork rather than
+          // ending abruptly at the hero image, Apple TV-style. Blurred pixels
+          // hide detail anyway, so this can stay at a much lower resolution
+          // than the sharp hero image above it.
+          if (backdropUrl != null)
+            Positioned.fill(
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 40, sigmaY: 40, tileMode: TileMode.decal),
+                child: CachedNetworkImage(
+                  imageUrl: backdropUrl,
+                  httpHeaders: JellyfinApiService.authHeaders(widget.token),
+                  fit: BoxFit.cover,
+                  memCacheWidth: 240,
+                ),
+              ),
             ),
-          ),
-          SliverToBoxAdapter(
+          if (backdropUrl != null) const Positioned.fill(child: ColoredBox(color: Color(0xCC090A0C))),
+          CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                expandedHeight: 320,
+                pinned: true,
+                backgroundColor: const Color(0xFF090A0C).withValues(alpha: .85),
+                flexibleSpace: FlexibleSpaceBar(
+                  background: backdropUrl == null
+                      ? const ColoredBox(color: Color(0xFF181A1E))
+                      : Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CachedNetworkImage(imageUrl: backdropUrl, httpHeaders: JellyfinApiService.authHeaders(widget.token), fit: BoxFit.cover, memCacheWidth: 1200),
+                            const DecoratedBox(
+                              decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF090A0C)])),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+              SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -357,6 +380,8 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ],
           const SliverToBoxAdapter(child: SizedBox(height: 32)),
+            ],
+          ),
         ],
       ),
     );
@@ -391,7 +416,7 @@ class _CastMember extends StatelessWidget {
     final item = person as Map<String, dynamic>;
     final personId = item['Id'] as String?;
     final tag = item['PrimaryImageTag'] as String?;
-    final imageUrl = personId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, personId, imageTag: tag) : null;
+    final imageUrl = personId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, personId, imageTag: tag, maxWidth: 220) : null;
     final name = item['Name'] as String? ?? '';
     final role = item['Role'] as String?;
 
@@ -407,7 +432,7 @@ class _CastMember extends StatelessWidget {
                 height: 72,
                 child: imageUrl == null
                     ? const ColoredBox(color: Color(0xFF17191D), child: Icon(Icons.person_outline, color: Colors.white24))
-                    : CachedNetworkImage(imageUrl: imageUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover, errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF17191D), child: Icon(Icons.person_outline, color: Colors.white24))),
+                    : CachedNetworkImage(imageUrl: imageUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover, memCacheWidth: 220, errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF17191D), child: Icon(Icons.person_outline, color: Colors.white24))),
               ),
             ),
             const SizedBox(height: 6),
@@ -474,7 +499,7 @@ class _EpisodeCard extends StatelessWidget {
     final indexNumber = item['IndexNumber'];
     final isWatched = (item['UserData'] as Map<String, dynamic>?)?['Played'] == true;
     final tag = item['PrimaryImageTag'] as String? ?? (item['ImageTags'] is Map ? (item['ImageTags'] as Map)['Primary'] as String? : null);
-    final imageUrl = itemId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, itemId, imageTag: tag) : null;
+    final imageUrl = itemId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, itemId, imageTag: tag, maxWidth: 500) : null;
 
     return GestureDetector(
       onTap: () => onPlay(item),
@@ -494,7 +519,7 @@ class _EpisodeCard extends StatelessWidget {
                       height: 96,
                       child: imageUrl == null
                           ? const ColoredBox(color: Color(0xFF17191D), child: Icon(Icons.movie_outlined, color: Colors.white24))
-                          : CachedNetworkImage(imageUrl: imageUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover, errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF17191D))),
+                          : CachedNetworkImage(imageUrl: imageUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover, memCacheWidth: 500, errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF17191D))),
                     ),
                   ),
                   if (isWatched)

@@ -456,7 +456,7 @@ class _HeroCard extends StatelessWidget {
     final name = item['Name'] as String? ?? 'Untitled';
     final overview = item['Overview'] as String?;
     final backdropTag = (item['BackdropImageTags'] as List<dynamic>?)?.whereType<String>().firstOrNull;
-    final backdropUrl = itemId != null && backdropTag != null ? JellyfinApiService.getBackdropUrl(serverUrl, itemId, imageTag: backdropTag) : null;
+    final backdropUrl = itemId != null && backdropTag != null ? JellyfinApiService.getBackdropUrl(serverUrl, itemId, imageTag: backdropTag, maxWidth: 1200) : null;
     final isMovie = item['Type'] == 'Movie';
 
     return GestureDetector(
@@ -468,7 +468,7 @@ class _HeroCard extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (backdropUrl != null) CachedNetworkImage(imageUrl: backdropUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover),
+            if (backdropUrl != null) CachedNetworkImage(imageUrl: backdropUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover, memCacheWidth: 1200),
             const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Color(0xFF090A0C)]))),
             Positioned(
               left: 20,
@@ -557,13 +557,14 @@ class _MediaPoster extends StatelessWidget {
     if (posterItemId == null || imageTag == null || imageTag.isEmpty) {
       content = _DarkPosterPlaceholder(fill: fill);
     } else {
-      final imageUrl = JellyfinApiService.getImageUrl(serverUrl, posterItemId, imageTag: imageTag);
+      final imageUrl = JellyfinApiService.getImageUrl(serverUrl, posterItemId, imageTag: imageTag, maxWidth: 400);
       content = ClipRRect(
         borderRadius: BorderRadius.circular(6),
         child: CachedNetworkImage(
           imageUrl: imageUrl,
           httpHeaders: JellyfinApiService.authHeaders(token),
           fit: BoxFit.cover,
+          memCacheWidth: 400,
           placeholder: (_, _) => _DarkPosterPlaceholder(fill: fill),
           errorWidget: (_, _, _) => _DarkPosterPlaceholder(fill: fill),
         ),
