@@ -89,6 +89,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller = VideoController(_player);
     final platform = _player.platform;
     if (platform is NativePlayer) {
+      void trySetProperty(String name, String value) {
+        try {
+          platform.setProperty(name, value);
+        } catch (e) {
+          print('Failed to set mpv property $name=$value: $e');
+        }
+      }
       // The Flutter texture mpv renders into isn't a real HDR-capable
       // display, so mpv's own HDR-vs-SDR auto-detection can't tell it needs
       // to tone-map — it passes raw PQ/HDR values straight through, which
@@ -96,9 +103,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // are display/color-only settings (no effect on networking or
       // demuxing), so this is much lower risk than the earlier reconnect
       // property change.
-      platform.setProperty('tone-mapping', 'hable');
-      platform.setProperty('target-trc', 'bt1886');
-      platform.setProperty('target-prim', 'bt709');
+      trySetProperty('tone-mapping', 'hable');
+      trySetProperty('target-trc', 'bt1886');
+      trySetProperty('target-prim', 'bt709');
+      // Server logs showed mpv's network read hitting ETIMEDOUT
+      // ("tcp: ffurl_read returned 0xffffffc4") ~17s into a 4K HDR
+      // tone-mapping transcode, before Jellyfin's ffmpeg had produced the
+      // first HLS segment — that encode has no hardware acceleration path
+      // and is genuinely slow to start. mpv then silently reconnects at the
+      // network layer (outside our own retry/session code entirely), which
+      // Jellyfin sees as a brand new session and starts a second competing
+      // transcode job, making the first one even slower. Raising mpv's
+      // network timeout gives the first segment time to actually finish
+      // instead of mpv giving up and retrying into a worse pileup.
+      trySetProperty('network-timeout', '60');
     }
     _player.stream.error.listen((error) {
       _lastKnownPosition = _player.state.position;
