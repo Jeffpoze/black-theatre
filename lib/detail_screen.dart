@@ -150,15 +150,24 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> _toggleWatched() => _setWatched(!_isWatched);
 
+  // Server logs showed two independent transcode jobs spun up ~15s apart
+  // for the same file, each competing for CPU with the other and likely
+  // starving both. That's consistent with a double-tap on Watch/an episode
+  // firing two overlapping PlayerScreen pushes (Flutter's route-transition
+  // animation leaves the old screen hit-testable for a frame or two), each
+  // independently negotiating its own Jellyfin session. Guard against it.
+  bool _isOpeningPlayer = false;
+
   void _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false, bool isAudioOnly = false}) {
+    if (_isOpeningPlayer) return;
+    _isOpeningPlayer = true;
     final route = MaterialPageRoute<void>(
       builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext, isAudioOnly: isAudioOnly, settings: widget.settings),
     );
-    if (replace) {
-      Navigator.of(context).pushReplacement(route);
-    } else {
-      Navigator.of(context).push(route);
-    }
+    final future = replace ? Navigator.of(context).pushReplacement(route) : Navigator.of(context).push(route);
+    future.then((_) {
+      if (mounted) _isOpeningPlayer = false;
+    });
   }
 
   void _playEpisode(Map<String, dynamic> episode, {bool replace = false, bool fromBeginning = false}) {

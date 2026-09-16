@@ -78,6 +78,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _lastKnownPosition = Duration.zero;
   String _playSessionId = '${DateTime.now().microsecondsSinceEpoch}';
   Timer? _progressTimer;
+  bool _hasOpenedStreamBefore = false;
 
   @override
   void initState() {
@@ -132,6 +133,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _openStream({required Duration position}) async {
+    // Reopening (quality/subtitle change, or Retry) without telling Jellyfin
+    // the previous session ended can leave its transcode job running
+    // alongside the new one — two ffmpeg jobs competing for the same CPU is
+    // exactly the kind of contention that starves both and shows up as a
+    // fatal read timeout on either.
+    if (_hasOpenedStreamBefore && !widget.isAudioOnly) {
+      _api.reportPlaybackStopped(widget.serverUrl, widget.token, widget.itemId, _playSessionId, _player.state.position);
+    }
+    _hasOpenedStreamBefore = true;
     if (widget.isAudioOnly) {
       final url = JellyfinApiService.getAudioStreamUrl(widget.serverUrl, widget.itemId, widget.userId, widget.token, maxBitrateBps: _quality.maxBitrateBps);
       _player.open(Media(url, httpHeaders: JellyfinApiService.authHeaders(widget.token), start: position));
