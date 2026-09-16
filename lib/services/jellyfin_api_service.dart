@@ -660,7 +660,7 @@ class JellyfinApiService {
     final cleanUrl = _normalizeUrl(serverUrl);
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items/$itemId').replace(
       queryParameters: {
-        'Fields': 'Overview,Genres,Studios,People,PrimaryImageTag,ImageTags,BackdropImageTags,CommunityRating,OfficialRating,PremiereDate,ProductionYear,EndDate,Status,RunTimeTicks',
+        'Fields': 'Overview,Genres,Studios,People,PrimaryImageTag,ImageTags,BackdropImageTags,CommunityRating,CriticRating,OfficialRating,PremiereDate,ProductionYear,EndDate,Status,RunTimeTicks',
       },
     );
     final response = await _client.get(uri, headers: authHeaders(token));

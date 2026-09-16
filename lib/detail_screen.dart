@@ -8,6 +8,13 @@ import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
 
+// `dynamic as Type?` throws if the value is non-null but the wrong type —
+// it does not return null. These treat an unexpected type as absent instead
+// of crashing the whole page over a single malformed/unusual field.
+String? _asString(dynamic value) => value is String ? value : null;
+int? _asInt(dynamic value) => value is num ? value.toInt() : null;
+num? _asNum(dynamic value) => value is num ? value : null;
+
 class DetailScreen extends StatefulWidget {
   const DetailScreen({super.key, required this.serverUrl, required this.userId, required this.token, required this.itemId, required this.settings});
   final String serverUrl;
@@ -227,25 +234,26 @@ class _DetailScreenState extends State<DetailScreen> {
     final item = _item;
     if (item == null) return Scaffold(body: Center(child: Text(_error ?? 'Not found', style: const TextStyle(color: Color(0xFFA5A7AC)))));
 
-    final name = item['Name'] as String? ?? 'Untitled';
+    final name = _asString(item['Name']) ?? 'Untitled';
     final year = item['ProductionYear']?.toString();
-    final officialRating = item['OfficialRating'] as String?;
-    final communityRating = item['CommunityRating'];
-    final criticRating = item['CriticRating'];
-    final overview = item['Overview'] as String?;
+    final officialRating = _asString(item['OfficialRating']);
+    final communityRating = _asNum(item['CommunityRating']);
+    final criticRating = _asNum(item['CriticRating']);
+    final overview = _asString(item['Overview']);
     final genres = (item['Genres'] as List<dynamic>?)?.whereType<String>().join(', ');
-    final studios = (item['Studios'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().map((s) => s['Name'] as String?).whereType<String>().join(', ');
+    final studios = (item['Studios'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().map((s) => _asString(s['Name'])).whereType<String>().join(', ');
     final people = (item['People'] as List<dynamic>?)?.whereType<Map<String, dynamic>>() ?? const [];
     final cast = people.where((p) => p['Type'] == 'Actor').toList();
-    final directors = people.where((p) => p['Type'] == 'Director').map((p) => p['Name'] as String?).whereType<String>().join(', ');
+    final directors = people.where((p) => p['Type'] == 'Director').map((p) => _asString(p['Name'])).whereType<String>().join(', ');
     final backdropTag = (item['BackdropImageTags'] as List<dynamic>?)?.whereType<String>().firstOrNull;
     final backdropUrl = backdropTag != null ? JellyfinApiService.getBackdropUrl(widget.serverUrl, widget.itemId, imageTag: backdropTag, maxWidth: 1200) : null;
-    final logoTag = (item['ImageTags'] as Map?)?['Logo'] as String?;
+    final imageTags = item['ImageTags'];
+    final logoTag = imageTags is Map ? _asString(imageTags['Logo']) : null;
     final logoUrl = logoTag != null ? JellyfinApiService.getLogoUrl(widget.serverUrl, widget.itemId, imageTag: logoTag, maxWidth: 800) : null;
     final isSeries = item['Type'] == 'Series';
     final isContainer = !isSeries && item['IsFolder'] == true;
     final canPlay = isSeries ? (_nextUp != null || _seasonEpisodes.isNotEmpty) : (isContainer ? _tracks.isNotEmpty : true);
-    final selectedSeasonName = _seasons.whereType<Map<String, dynamic>>().firstWhere((s) => s['Id'] == _selectedSeasonId, orElse: () => const {})['Name'] as String?;
+    final selectedSeasonName = _asString(_seasons.whereType<Map<String, dynamic>>().firstWhere((s) => s['Id'] == _selectedSeasonId, orElse: () => const {})['Name']);
 
     return Scaffold(
       backgroundColor: const Color(0xFF090A0C),
@@ -325,8 +333,8 @@ class _DetailScreenState extends State<DetailScreen> {
                     Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       if (year != null) Text(year, style: const TextStyle(color: Color(0xFFA5A7AC))),
                       if (officialRating != null) _RatingPill(text: officialRating),
-                      if (communityRating != null) _RatingBadge(icon: Icons.star, color: Colors.amber, value: (communityRating as num).toStringAsFixed(1)),
-                      if (criticRating != null) _RatingBadge(icon: Icons.local_movies, color: const Color(0xFFFF5252), value: '${(criticRating as num).round()}%'),
+                      if (communityRating != null) _RatingBadge(icon: Icons.star, color: Colors.amber, value: communityRating.toStringAsFixed(1)),
+                      if (criticRating != null) _RatingBadge(icon: Icons.local_movies, color: const Color(0xFFFF5252), value: '${criticRating.round()}%'),
                     ]),
                   const SizedBox(height: 20),
                   if (canPlay) ...[
@@ -443,10 +451,10 @@ class _EpisodeMetaRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final season = episode['ParentIndexNumber'];
     final indexNumber = episode['IndexNumber'];
-    final date = _formatDate(episode['PremiereDate'] as String?);
+    final date = _formatDate(_asString(episode['PremiereDate']));
     final runtimeTicks = episode['RunTimeTicks'];
     final runtimeMinutes = runtimeTicks != null ? ticksToDuration(runtimeTicks).inMinutes : null;
-    final rating = (episode['OfficialRating'] as String?) ?? fallbackRating;
+    final rating = _asString(episode['OfficialRating']) ?? fallbackRating;
 
     return Wrap(spacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
       if (season != null && indexNumber != null) Text('S$season • E$indexNumber', style: const TextStyle(color: Color(0xFFA5A7AC), fontWeight: FontWeight.w600)),
@@ -543,15 +551,15 @@ class _TechInfo extends StatelessWidget {
 
     String? videoLine;
     if (video != null) {
-      final res = _resolutionLabel(video['Height'] as int?);
-      final isDovi = (video['VideoRangeType'] as String?)?.toUpperCase().contains('DOVI') == true;
-      final profile = video['Profile'] as String?;
-      final codec = _codecLabel(video['Codec'] as String?);
+      final res = _resolutionLabel(_asInt(video['Height']));
+      final isDovi = _asString(video['VideoRangeType'])?.toUpperCase().contains('DOVI') == true;
+      final profile = _asString(video['Profile']);
+      final codec = _codecLabel(_asString(video['Codec']));
       videoLine = '$res${isDovi ? ' DoVi' : ''} ($codec${profile != null ? ' $profile' : ''})';
     }
 
-    final audioLine = audio == null ? null : (audio['DisplayTitle'] as String? ?? '${(audio['Language'] as String?)?.toUpperCase() ?? 'Unknown'} (${_codecLabel(audio['Codec'] as String?)})');
-    final subtitleLine = subtitle == null ? null : (subtitle['DisplayTitle'] as String? ?? '${(subtitle['Language'] as String?)?.toUpperCase() ?? 'Unknown'} (${_codecLabel(subtitle['Codec'] as String?)})');
+    final audioLine = audio == null ? null : (_asString(audio['DisplayTitle']) ?? '${_asString(audio['Language'])?.toUpperCase() ?? 'Unknown'} (${_codecLabel(_asString(audio['Codec']))})');
+    final subtitleLine = subtitle == null ? null : (_asString(subtitle['DisplayTitle']) ?? '${_asString(subtitle['Language'])?.toUpperCase() ?? 'Unknown'} (${_codecLabel(_asString(subtitle['Codec']))})');
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (videoLine != null) _InfoRow(label: 'Video', value: videoLine),
