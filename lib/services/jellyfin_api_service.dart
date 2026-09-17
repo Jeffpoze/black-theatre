@@ -764,11 +764,41 @@ class JellyfinApiService {
   Future<List<dynamic>> getStudios(
     String serverUrl,
     String userId,
+    String token, [
+    String? viewId,
+  ]) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Studios').replace(queryParameters: {'userId': userId, 'parentId': ?viewId, 'Fields': 'ImageTags'});
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
+  // "Network" browsing (Apple TV, Netflix, Prime, …) — Jellyfin doesn't have
+  // a distinct Network field, but its metadata providers commonly store the
+  // distributing network in the same Studios list movies/shows already
+  // carry, and Studio items can have their own logo image when a provider
+  // supplied one.
+  Future<List<dynamic>> getItemsByStudio(
+    String serverUrl,
+    String userId,
     String token,
-    String viewId,
+    String studioId,
   ) async {
     final cleanUrl = _normalizeUrl(serverUrl);
-    final uri = Uri.parse('$cleanUrl/Studios').replace(queryParameters: {'userId': userId, 'parentId': viewId});
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
+      queryParameters: {
+        'StudioIds': studioId,
+        'Recursive': 'true',
+        'IncludeItemTypes': 'Movie,Series',
+        'SortBy': 'SortName',
+        'SortOrder': 'Ascending',
+        'Limit': '200',
+        'Fields': 'PrimaryImageTag,ImageTags,PremiereDate,ProductionYear,EndDate,Status,CommunityRating',
+      },
+    );
     final response = await _client.get(uri, headers: authHeaders(token));
     if (response.statusCode < 200 || response.statusCode >= 300) return const [];
     final data = jsonDecode(response.body);
@@ -804,6 +834,11 @@ class JellyfinApiService {
       todayUtc.month,
       todayUtc.day,
     ).toIso8601String();
+    final maxPremiereDate = DateTime.utc(
+      todayUtc.year,
+      todayUtc.month,
+      todayUtc.day,
+    ).add(const Duration(days: 7)).toIso8601String();
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
       queryParameters: {
         'Recursive': 'true',
@@ -813,6 +848,7 @@ class JellyfinApiService {
         // items; MinPremiereDate alone is a more reliable "is this in the
         // future" check.
         'MinPremiereDate': minPremiereDate,
+        'MaxPremiereDate': maxPremiereDate,
         'SortBy': 'PremiereDate',
         'SortOrder': 'Ascending',
         'Limit': '100',

@@ -11,6 +11,7 @@ import 'detail_screen.dart';
 import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
+import 'networks_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
 
@@ -462,6 +463,13 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openNetworks() {
+    Navigator.of(context).pop();
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => NetworksScreen(session: widget.session, settings: widget.settings)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _selectedCategoryId == null
@@ -518,6 +526,7 @@ class _HomePageState extends State<HomePage> {
         onSelect: _selectCategory,
         onSettings: _openSettings,
         onCalendar: _openCalendar,
+        onNetworks: _openNetworks,
       ),
       body: _selectedCategoryId == null
           ? ListView(
@@ -574,12 +583,14 @@ class _CategoryDrawer extends StatelessWidget {
     required this.onSelect,
     required this.onSettings,
     required this.onCalendar,
+    required this.onNetworks,
   });
   final List<dynamic> libraryViews;
   final String? selectedId;
   final void Function(String?) onSelect;
   final VoidCallback onSettings;
   final VoidCallback onCalendar;
+  final VoidCallback onNetworks;
 
   @override
   Widget build(BuildContext context) => Drawer(
@@ -623,6 +634,11 @@ class _CategoryDrawer extends StatelessWidget {
             leading: const Icon(Icons.calendar_today_outlined),
             title: const Text('Calendar'),
             onTap: onCalendar,
+          ),
+          ListTile(
+            leading: const Icon(Icons.live_tv_outlined),
+            title: const Text('Networks'),
+            onTap: onNetworks,
           ),
           ListTile(
             leading: const Icon(Icons.settings_outlined),
