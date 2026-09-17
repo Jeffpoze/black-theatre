@@ -653,12 +653,24 @@ class _DetailScreenState extends State<DetailScreen> {
                                     ),
                                   if (isSeries && _nextUp != null) ...[
                                     const SizedBox(height: 10),
-                                    Text(
-                                      _asString(_nextUp!['Name']) ?? 'Next episode',
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w700,
+                                    GestureDetector(
+                                      onTap: _seasons.length > 1 ? _openSeasonPicker : null,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              _asString(_nextUp!['Name']) ?? 'Next episode',
+                                              textAlign: TextAlign.center,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                          if (_seasons.length > 1) const Icon(Icons.expand_more, size: 20),
+                                        ],
                                       ),
                                     ),
                                   ],
@@ -680,7 +692,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     const SizedBox(height: 8),
                   ],
                   if (isSeries && _nextUp != null)
-                    _EpisodeMetaRow(episode: _nextUp!, fallbackRating: officialRating)
+                    _EpisodeMetaRow(episode: _nextUp!, fallbackRating: officialRating, communityRating: communityRating, imdbRating: _imdbRating, rottenTomatoesRating: _rottenTomatoesRating)
                   else
                     Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       if (year != null) Text(year, style: const TextStyle(color: Color(0xFFA5A7AC))),
@@ -794,9 +806,12 @@ class _DetailScreenState extends State<DetailScreen> {
 }
 
 class _EpisodeMetaRow extends StatelessWidget {
-  const _EpisodeMetaRow({required this.episode, this.fallbackRating});
+  const _EpisodeMetaRow({required this.episode, this.fallbackRating, this.communityRating, this.imdbRating, this.rottenTomatoesRating});
   final Map<String, dynamic> episode;
   final String? fallbackRating;
+  final num? communityRating;
+  final String? imdbRating;
+  final String? rottenTomatoesRating;
 
   static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -820,6 +835,9 @@ class _EpisodeMetaRow extends StatelessWidget {
       if (date != null) Text(date, style: const TextStyle(color: Color(0xFFA5A7AC))),
       if (runtimeMinutes != null && runtimeMinutes > 0) Text('${runtimeMinutes}m', style: const TextStyle(color: Color(0xFFA5A7AC))),
       if (rating != null) _RatingPill(text: rating),
+      if (imdbRating != null) _SourceBadge(label: 'IMDb', value: imdbRating!, labelColor: const Color(0xFFF5C518), labelTextColor: Colors.black),
+      if (rottenTomatoesRating != null) _SourceBadge(label: 'RT', value: rottenTomatoesRating!, labelColor: const Color(0xFFFA320A), labelTextColor: Colors.white),
+      if (communityRating != null) _SourceBadge(label: 'TVDB', value: communityRating!.toStringAsFixed(1), labelColor: const Color(0xFF6CD591), labelTextColor: Colors.black),
     ]);
   }
 }
@@ -830,9 +848,9 @@ class _RatingPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(border: Border.all(color: const Color(0xFFA5A7AC)), borderRadius: BorderRadius.circular(4)),
-        child: Text(text, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(4)),
+        child: Text(text, style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600)),
       );
 }
 
@@ -846,7 +864,7 @@ class _SourceBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-        decoration: BoxDecoration(color: Colors.black.withValues(alpha: .35), borderRadius: BorderRadius.circular(4)),
+        decoration: BoxDecoration(color: Colors.black.withValues(alpha: .6), borderRadius: BorderRadius.circular(4)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
