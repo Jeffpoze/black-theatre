@@ -91,7 +91,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _controller = NativeVideoPlayerController(
       id: _nextControllerId++,
@@ -99,7 +102,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       showNativeControls: false,
       allowsPictureInPicture: true,
       canStartPictureInPictureAutomatically: true,
-      mediaInfo: NativeVideoPlayerMediaInfo(title: widget.title, subtitle: widget.subtitle),
+      mediaInfo: NativeVideoPlayerMediaInfo(
+        title: widget.title,
+        subtitle: widget.subtitle,
+      ),
     );
     _controller.addActivityListener(_handleActivityEvent);
     _controller.addAirPlayAvailabilityListener(_handleAirPlayAvailability);
@@ -111,9 +117,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // keep-alive. Ping roughly every 10s while a stream is open.
       _progressTimer = Timer.periodic(const Duration(seconds: 10), (_) {
         if (_error == null) {
-          final position = _castSession?.status.position ?? _controller.currentPosition;
-          final paused = _castSession != null ? !_castSession!.status.isPlaying : !_controller.activityState.isPlaying;
-          _api.reportPlaybackProgress(widget.serverUrl, widget.token, widget.itemId, _playSessionId, position, isPaused: paused);
+          final position =
+              _castSession?.status.position ?? _controller.currentPosition;
+          final paused = _castSession != null
+              ? !_castSession!.status.isPlaying
+              : !_controller.activityState.isPlaying;
+          _api.reportPlaybackProgress(
+            widget.serverUrl,
+            widget.token,
+            widget.itemId,
+            _playSessionId,
+            position,
+            isPaused: paused,
+          );
         }
       });
     }
@@ -129,7 +145,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     if (!widget.isAudioOnly) {
       try {
-        final streams = await _api.getMediaStreams(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+        final streams = await _api.getMediaStreams(
+          widget.serverUrl,
+          widget.userId,
+          widget.token,
+          widget.itemId,
+        );
         if (mounted) setState(() => _jellyfinStreams = streams);
       } catch (_) {}
     }
@@ -143,13 +164,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // exactly the kind of contention that starves both and shows up as a
     // fatal read timeout on either.
     if (_hasOpenedStreamBefore && !widget.isAudioOnly) {
-      _api.reportPlaybackStopped(widget.serverUrl, widget.token, widget.itemId, _playSessionId, _controller.currentPosition);
+      _api.reportPlaybackStopped(
+        widget.serverUrl,
+        widget.token,
+        widget.itemId,
+        _playSessionId,
+        _controller.currentPosition,
+      );
     }
     _hasOpenedStreamBefore = true;
     if (widget.isAudioOnly) {
-      final url = JellyfinApiService.getAudioStreamUrl(widget.serverUrl, widget.itemId, widget.userId, widget.token, maxBitrateBps: _quality.maxBitrateBps);
+      final url = JellyfinApiService.getAudioStreamUrl(
+        widget.serverUrl,
+        widget.itemId,
+        widget.userId,
+        widget.token,
+        maxBitrateBps: _quality.maxBitrateBps,
+      );
       _currentStreamUrl = url;
-      await _controller.load(url: url, headers: JellyfinApiService.authHeaders(widget.token), startAt: position, force: true);
+      await _controller.load(
+        url: url,
+        headers: JellyfinApiService.authHeaders(widget.token),
+        startAt: position,
+        force: true,
+      );
       if (_speed != 1.0) await _controller.setSpeed(_speed);
       return;
     }
@@ -159,20 +197,42 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // using the known-working forced-transcode request.
     if (_quality == StreamQuality.original && _subtitleStreamIndex == null) {
       try {
-        final playbackInfo = await _api.getPlaybackInfo(widget.serverUrl, widget.userId, widget.token, widget.itemId);
-        final result = JellyfinApiService.buildUrlFromPlaybackInfo(widget.serverUrl, widget.itemId, widget.token, playbackInfo);
+        final playbackInfo = await _api.getPlaybackInfo(
+          widget.serverUrl,
+          widget.userId,
+          widget.token,
+          widget.itemId,
+        );
+        final result = JellyfinApiService.buildUrlFromPlaybackInfo(
+          widget.serverUrl,
+          widget.itemId,
+          widget.token,
+          playbackInfo,
+        );
         if (result != null) {
           final (url, playSessionId) = result;
           _playSessionId = playSessionId;
           _currentStreamUrl = url;
           _lastManifestCheck = await _api.debugCheckManifest(url, widget.token);
-          await _controller.load(url: url, headers: JellyfinApiService.authHeaders(widget.token), startAt: position, force: true);
+          await _controller.load(
+            url: url,
+            headers: JellyfinApiService.authHeaders(widget.token),
+            startAt: position,
+            force: true,
+          );
           if (_speed != 1.0) await _controller.setSpeed(_speed);
-          _api.reportPlaybackStart(widget.serverUrl, widget.token, widget.itemId, _playSessionId);
+          _api.reportPlaybackStart(
+            widget.serverUrl,
+            widget.token,
+            widget.itemId,
+            _playSessionId,
+          );
           return;
         }
       } catch (e) {
-        print('getPlaybackInfo negotiation failed for ${widget.itemId}, falling back to forced transcode: $e');
+        print(
+          'getPlaybackInfo negotiation failed for ${widget.itemId}, falling back to forced transcode: $e',
+        );
       }
     }
 
@@ -182,27 +242,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
       widget.token,
       maxBitrateBps: _quality.maxBitrateBps,
       subtitleStreamIndex: _subtitleStreamIndex,
-      subtitleMethod: _subtitleStreamIndex == null ? null : JellyfinApiService.subtitleMethodFor(_subtitleCodec(_subtitleStreamIndex!)),
+      subtitleMethod: _subtitleStreamIndex == null
+          ? null
+          : JellyfinApiService.subtitleMethodFor(
+              _subtitleCodec(_subtitleStreamIndex!),
+            ),
       playSessionId: _playSessionId,
     );
     _currentStreamUrl = url;
     _lastManifestCheck = await _api.debugCheckManifest(url, widget.token);
-    await _controller.load(url: url, headers: JellyfinApiService.authHeaders(widget.token), startAt: position, force: true);
+    await _controller.load(
+      url: url,
+      headers: JellyfinApiService.authHeaders(widget.token),
+      startAt: position,
+      force: true,
+    );
     if (_speed != 1.0) await _controller.setSpeed(_speed);
-    _api.reportPlaybackStart(widget.serverUrl, widget.token, widget.itemId, _playSessionId);
+    _api.reportPlaybackStart(
+      widget.serverUrl,
+      widget.token,
+      widget.itemId,
+      _playSessionId,
+    );
   }
 
   void _handleActivityEvent(PlayerActivityEvent event) {
     switch (event.state) {
       case PlayerActivityState.error:
         _lastKnownPosition = _controller.currentPosition;
-        final nativeMessage = (event.data?['message'] as String?) ?? 'Unable to play this video.';
+        final nativeMessage =
+            (event.data?['message'] as String?) ?? 'Unable to play this video.';
         // TEMPORARY diagnostic: shows what the manifest URL actually
-        // returned when fetched directly, to tell apart an HTTP/auth
+        // returned when fetched directly, to tell apart an HTTP/timeout
         // failure on our side from AVFoundation's generic "Cannot Open"
         // bucket rejecting a response that was actually fine.
         final diagnostic = _lastManifestCheck;
-        if (mounted) setState(() => _error = diagnostic == null ? nativeMessage : '$nativeMessage\n\nManifest check: $diagnostic');
+        if (mounted) {
+          setState(() => _error = diagnostic == null ? nativeMessage : '$nativeMessage\n\nManifest check: $diagnostic');
+        }
         break;
       case PlayerActivityState.completed:
         if (widget.onNext != null) widget.onNext!();
@@ -221,29 +298,54 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   String? _subtitleCodec(int index) {
-    final match = _jellyfinStreams.whereType<Map<String, dynamic>>().where((s) => s['Index'] == index);
+    final match = _jellyfinStreams.whereType<Map<String, dynamic>>().where(
+      (s) => s['Index'] == index,
+    );
     return match.isEmpty ? null : match.first['Codec'] as String?;
   }
 
-  List<Map<String, dynamic>> get _subtitleTracks => _jellyfinStreams.whereType<Map<String, dynamic>>().where((s) => s['Type'] == 'Subtitle').toList();
+  List<Map<String, dynamic>> get _subtitleTracks => _jellyfinStreams
+      .whereType<Map<String, dynamic>>()
+      .where((s) => s['Type'] == 'Subtitle')
+      .toList();
 
   static const _languageNames = {
-    'eng': 'English', 'en': 'English',
-    'fre': 'French', 'fra': 'French', 'fr': 'French',
-    'ger': 'German', 'deu': 'German', 'de': 'German',
-    'spa': 'Spanish', 'es': 'Spanish',
-    'ita': 'Italian', 'it': 'Italian',
-    'jpn': 'Japanese', 'ja': 'Japanese',
-    'kor': 'Korean', 'ko': 'Korean',
-    'chi': 'Chinese', 'zho': 'Chinese', 'zh': 'Chinese',
-    'por': 'Portuguese', 'pt': 'Portuguese',
-    'rus': 'Russian', 'ru': 'Russian',
-    'ara': 'Arabic', 'ar': 'Arabic',
-    'hin': 'Hindi', 'hi': 'Hindi',
-    'dut': 'Dutch', 'nld': 'Dutch', 'nl': 'Dutch',
-    'swe': 'Swedish', 'sv': 'Swedish',
-    'pol': 'Polish', 'pl': 'Polish',
-    'tur': 'Turkish', 'tr': 'Turkish',
+    'eng': 'English',
+    'en': 'English',
+    'fre': 'French',
+    'fra': 'French',
+    'fr': 'French',
+    'ger': 'German',
+    'deu': 'German',
+    'de': 'German',
+    'spa': 'Spanish',
+    'es': 'Spanish',
+    'ita': 'Italian',
+    'it': 'Italian',
+    'jpn': 'Japanese',
+    'ja': 'Japanese',
+    'kor': 'Korean',
+    'ko': 'Korean',
+    'chi': 'Chinese',
+    'zho': 'Chinese',
+    'zh': 'Chinese',
+    'por': 'Portuguese',
+    'pt': 'Portuguese',
+    'rus': 'Russian',
+    'ru': 'Russian',
+    'ara': 'Arabic',
+    'ar': 'Arabic',
+    'hin': 'Hindi',
+    'hi': 'Hindi',
+    'dut': 'Dutch',
+    'nld': 'Dutch',
+    'nl': 'Dutch',
+    'swe': 'Swedish',
+    'sv': 'Swedish',
+    'pol': 'Polish',
+    'pl': 'Polish',
+    'tur': 'Turkish',
+    'tr': 'Turkish',
   };
 
   String? _languageName(String? code) {
@@ -261,7 +363,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final tracks = _subtitleTracks;
     if (tracks.isEmpty) return;
     final position = _controller.currentPosition;
-    setState(() => _subtitleStreamIndex = _subtitleStreamIndex == null ? tracks.first['Index'] as int? : null);
+    setState(
+      () => _subtitleStreamIndex = _subtitleStreamIndex == null
+          ? tracks.first['Index'] as int?
+          : null,
+    );
     await _openStream(position: position);
   }
 
@@ -280,7 +386,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _seekBy(Duration offset) {
     final position = _controller.currentPosition + offset;
     final duration = _controller.duration;
-    final clamped = position < Duration.zero ? Duration.zero : (duration > Duration.zero && position > duration ? duration : position);
+    final clamped = position < Duration.zero
+        ? Duration.zero
+        : (duration > Duration.zero && position > duration
+              ? duration
+              : position);
     _controller.seekTo(clamped);
   }
 
@@ -302,11 +412,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       builder: (sheetContext) => _PlayerSettingsSheet(
         quality: _quality,
         subtitleLabel: _subtitleLabel(),
-        audioLabel: audioTracks.isEmpty ? 'Default' : _audioTrackLabel(audioTracks.firstWhere((t) => t.isSelected, orElse: () => audioTracks.first)),
+        audioLabel: audioTracks.isEmpty
+            ? 'Default'
+            : _audioTrackLabel(
+                audioTracks.firstWhere(
+                  (t) => t.isSelected,
+                  orElse: () => audioTracks.first,
+                ),
+              ),
         hasSubtitles: subtitleStreams.isNotEmpty,
         hasAudioChoices: audioTracks.length > 1,
         onQuality: () => _chooseQuality(sheetContext, position),
-        onSubtitles: () => _chooseSubtitles(sheetContext, position, subtitleStreams),
+        onSubtitles: () =>
+            _chooseSubtitles(sheetContext, position, subtitleStreams),
         onAudio: () => _chooseAudio(sheetContext, audioTracks),
       ),
     );
@@ -314,53 +432,88 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   String _subtitleLabel() {
     if (_subtitleStreamIndex == null) return 'Off';
-    final stream = _subtitleTracks.cast<Map<String, dynamic>>().where((s) => s['Index'] == _subtitleStreamIndex).firstOrNull;
+    final stream = _subtitleTracks
+        .cast<Map<String, dynamic>>()
+        .where((s) => s['Index'] == _subtitleStreamIndex)
+        .firstOrNull;
     if (stream == null) return 'On';
     final language = _languageName(stream['Language'] as String?) ?? 'Unknown';
     final codec = (stream['Codec'] as String?)?.toUpperCase();
     return codec == null || codec.isEmpty ? language : '$language ($codec)';
   }
 
-  Future<void> _chooseQuality(BuildContext sheetContext, Duration position) async {
+  Future<void> _chooseQuality(
+    BuildContext sheetContext,
+    Duration position,
+  ) async {
     final selected = await _showChoiceSheet<StreamQuality>(
       sheetContext,
       title: 'Quality',
       value: _quality,
-      options: StreamQuality.values.map((quality) => _ChoiceOption(quality, quality.label)).toList(),
+      options: StreamQuality.values
+          .map((quality) => _ChoiceOption(quality, quality.label))
+          .toList(),
     );
     if (selected == null || !mounted) return;
     setState(() => _quality = selected);
     await _openStream(position: position);
   }
 
-  Future<void> _chooseSubtitles(BuildContext sheetContext, Duration position, List<Map<String, dynamic>> streams) async {
+  Future<void> _chooseSubtitles(
+    BuildContext sheetContext,
+    Duration position,
+    List<Map<String, dynamic>> streams,
+  ) async {
     final options = <_ChoiceOption<int?>>[_ChoiceOption(null, 'Off')];
     for (final stream in streams) {
-      final language = _languageName(stream['Language'] as String?) ?? 'Unknown';
+      final language =
+          _languageName(stream['Language'] as String?) ?? 'Unknown';
       final codec = (stream['Codec'] as String?)?.toUpperCase();
-      options.add(_ChoiceOption(stream['Index'] as int?, codec == null ? language : '$language ($codec)'));
+      options.add(
+        _ChoiceOption(
+          stream['Index'] as int?,
+          codec == null ? language : '$language ($codec)',
+        ),
+      );
     }
-    final selected = await _showChoiceSheet<int?>(sheetContext, title: 'Subtitles', value: _subtitleStreamIndex, options: options);
+    final selected = await _showChoiceSheet<int?>(
+      sheetContext,
+      title: 'Subtitles',
+      value: _subtitleStreamIndex,
+      options: options,
+    );
     if (!mounted) return;
     setState(() => _subtitleStreamIndex = selected);
     await _openStream(position: position);
   }
 
-  Future<void> _chooseAudio(BuildContext sheetContext, List<NativeVideoPlayerAudioTrack> tracks) async {
+  Future<void> _chooseAudio(
+    BuildContext sheetContext,
+    List<NativeVideoPlayerAudioTrack> tracks,
+  ) async {
     final selectedIndex = await _showChoiceSheet<int>(
       sheetContext,
       title: 'Audio',
       value: tracks.indexWhere((t) => t.isSelected),
-      options: [for (var i = 0; i < tracks.length; i++) _ChoiceOption(i, _audioTrackLabel(tracks[i]))],
+      options: [
+        for (var i = 0; i < tracks.length; i++)
+          _ChoiceOption(i, _audioTrackLabel(tracks[i])),
+      ],
     );
     if (selectedIndex == null || selectedIndex < 0 || !mounted) return;
     await _controller.setAudioTrack(tracks[selectedIndex]);
   }
 
-  Future<T?> _showChoiceSheet<T>(BuildContext context, {required String title, required T value, required List<_ChoiceOption<T>> options}) => showModalBottomSheet<T>(
+  Future<T?> _showChoiceSheet<T>(
+    BuildContext context, {
+    required String title,
+    required T value,
+    required List<_ChoiceOption<T>> options,
+  }) => showModalBottomSheet<T>(
     context: context,
     backgroundColor: Colors.transparent,
-    builder: (context) => _ChoiceSheet<T>(title: title, value: value, options: options),
+    builder: (context) =>
+        _ChoiceSheet<T>(title: title, value: value, options: options),
   );
 
   Future<void> _showCastPicker() async {
@@ -368,10 +521,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       context: context,
       backgroundColor: const Color(0xFF101114),
       isScrollControlled: true,
-      builder: (sheetContext) => _CastPickerSheet(onSelected: (device) {
-        Navigator.of(sheetContext).pop();
-        _connectCast(device);
-      }),
+      builder: (sheetContext) => _CastPickerSheet(
+        onSelected: (device) {
+          Navigator.of(sheetContext).pop();
+          _connectCast(device);
+        },
+      ),
     );
   }
 
@@ -401,7 +556,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not cast to ${device.displayName}: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not cast to ${device.displayName}: $e'),
+          ),
+        );
       }
     }
   }
@@ -427,8 +586,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _castStatusSub?.cancel();
     _castSession?.close();
     if (!widget.isAudioOnly) {
-      final position = _castSession?.status.position ?? _controller.currentPosition;
-      _api.reportPlaybackStopped(widget.serverUrl, widget.token, widget.itemId, _playSessionId, position);
+      final position =
+          _castSession?.status.position ?? _controller.currentPosition;
+      _api.reportPlaybackStopped(
+        widget.serverUrl,
+        widget.token,
+        widget.itemId,
+        _playSessionId,
+        position,
+      );
     }
     _controller.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
@@ -443,74 +609,103 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ? Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('Unable to play this video.\n$_error', textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFA5A7AC))),
-                const SizedBox(height: 20),
-                FilledButton(onPressed: _retry, child: const Text('Retry')),
-              ]),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Unable to play this video.\n$_error',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Color(0xFFA5A7AC)),
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton(onPressed: _retry, child: const Text('Retry')),
+                ],
+              ),
             ),
           )
         : _castSession != null
-            ? _CastingView(device: _castDevice!, session: _castSession!, title: widget.title, subtitle: widget.subtitle, onStop: _disconnectCast)
-            : NativeVideoPlayer(
-                controller: _controller,
-                overlayBuilder: (overlayContext, controller) => _locked
-                    ? Positioned(
-                        left: 16,
-                        bottom: 16,
-                        child: SafeArea(
-                          child: IconButton(
-                            onPressed: _toggleLock,
-                            icon: const Icon(Icons.lock_outline, color: Colors.white70),
-                            style: IconButton.styleFrom(backgroundColor: Colors.black45),
+        ? _CastingView(
+            device: _castDevice!,
+            session: _castSession!,
+            title: widget.title,
+            subtitle: widget.subtitle,
+            onStop: _disconnectCast,
+          )
+        : NativeVideoPlayer(
+            controller: _controller,
+            overlayBuilder: (overlayContext, controller) => _locked
+                ? Positioned(
+                    left: 16,
+                    bottom: 16,
+                    child: SafeArea(
+                      child: IconButton(
+                        onPressed: _toggleLock,
+                        icon: const Icon(
+                          Icons.lock_outline,
+                          color: Colors.white70,
+                        ),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black45,
+                        ),
+                      ),
+                    ),
+                  )
+                : Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black.withValues(alpha: .6),
+                              Colors.transparent,
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: .75),
+                            ],
                           ),
                         ),
-                      )
-                    : Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [Colors.black.withValues(alpha: .6), Colors.transparent, Colors.transparent, Colors.black.withValues(alpha: .75)],
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            child: _TopBar(
-                              title: widget.title,
-                              subtitle: widget.subtitle,
-                              onBack: () => Navigator.of(context).pop(),
-                              onLock: _toggleLock,
-                              isAirplayAvailable: _isAirplayAvailable,
-                              isAirplayConnected: _isAirplayConnected,
-                              onAirPlay: () => _controller.showAirPlayPicker(),
-                              onCast: _showCastPicker,
-                            ),
-                          ),
-                          _CenterControls(
-                            controller: _controller,
-                            skipSeconds: widget.settings.skipSeconds,
-                            onSeekBack: () => _seekBy(Duration(seconds: -widget.settings.skipSeconds)),
-                            onSeekForward: () => _seekBy(Duration(seconds: widget.settings.skipSeconds)),
-                            onPrevious: () => _seekBy(const Duration(seconds: -10)),
-                            onNext: widget.onNext,
-                            onPlayPause: _togglePlayPause,
-                          ),
-                          _BottomBar(
-                            controller: _controller,
-                            onSettings: _openSettings,
-                            onToggleSubtitles: _subtitleTracks.isEmpty ? null : _toggleSubtitles,
-                            subtitlesOn: _subtitleStreamIndex != null,
-                          ),
-                        ],
                       ),
-              ),
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: _TopBar(
+                          title: widget.title,
+                          subtitle: widget.subtitle,
+                          onBack: () => Navigator.of(context).pop(),
+                          onLock: _toggleLock,
+                          isAirplayAvailable: _isAirplayAvailable,
+                          isAirplayConnected: _isAirplayConnected,
+                          onAirPlay: () => _controller.showAirPlayPicker(),
+                          onCast: _showCastPicker,
+                        ),
+                      ),
+                      _CenterControls(
+                        controller: _controller,
+                        skipSeconds: widget.settings.skipSeconds,
+                        onSeekBack: () => _seekBy(
+                          Duration(seconds: -widget.settings.skipSeconds),
+                        ),
+                        onSeekForward: () => _seekBy(
+                          Duration(seconds: widget.settings.skipSeconds),
+                        ),
+                        onPrevious: () => _seekBy(const Duration(seconds: -10)),
+                        onNext: widget.onNext,
+                        onPlayPause: _togglePlayPause,
+                      ),
+                      _BottomBar(
+                        controller: _controller,
+                        onSettings: _openSettings,
+                        onToggleSubtitles: _subtitleTracks.isEmpty
+                            ? null
+                            : _toggleSubtitles,
+                        subtitlesOn: _subtitleStreamIndex != null,
+                      ),
+                    ],
+                  ),
+          ),
   );
 }
 
@@ -540,18 +735,49 @@ class _PlayerSettingsSheet extends StatelessWidget {
     child: Container(
       margin: const EdgeInsets.symmetric(horizontal: 66),
       padding: const EdgeInsets.fromLTRB(34, 12, 34, 34),
-      decoration: const BoxDecoration(color: Colors.black, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+      decoration: const BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 42, height: 5, decoration: BoxDecoration(color: const Color(0xFF29292C), borderRadius: BorderRadius.circular(99))),
+          Container(
+            width: 42,
+            height: 5,
+            decoration: BoxDecoration(
+              color: const Color(0xFF29292C),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
           const SizedBox(height: 28),
-          const Text('Settings', style: TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w800)),
+          const Text(
+            'Settings',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 25,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 26),
           const Divider(color: Color(0xFF252529), height: 1),
-          _SettingsRow(label: 'Quality', value: quality == StreamQuality.original ? 'Original' : quality.label, onTap: onQuality),
-          _SettingsRow(label: 'Subtitles', value: subtitleLabel, onTap: hasSubtitles ? onSubtitles : null),
-          _SettingsRow(label: 'Audio', value: audioLabel, onTap: hasAudioChoices ? onAudio : null),
+          _SettingsRow(
+            label: 'Quality',
+            value: quality == StreamQuality.original
+                ? 'Original'
+                : quality.label,
+            onTap: onQuality,
+          ),
+          _SettingsRow(
+            label: 'Subtitles',
+            value: subtitleLabel,
+            onTap: hasSubtitles ? onSubtitles : null,
+          ),
+          _SettingsRow(
+            label: 'Audio',
+            value: audioLabel,
+            onTap: hasAudioChoices ? onAudio : null,
+          ),
           const _SettingsRow(label: 'Playback Options', value: '', onTap: null),
         ],
       ),
@@ -560,7 +786,11 @@ class _PlayerSettingsSheet extends StatelessWidget {
 }
 
 class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({required this.label, required this.value, required this.onTap});
+  const _SettingsRow({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
   final String label;
   final String value;
   final VoidCallback? onTap;
@@ -571,12 +801,28 @@ class _SettingsRow extends StatelessWidget {
     borderRadius: BorderRadius.circular(8),
     child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 25),
-      child: Row(children: [
-        Text(label, style: TextStyle(color: onTap == null ? const Color(0xFF808084) : Colors.white, fontSize: 20)),
-        const Spacer(),
-        if (value.isNotEmpty) Text(value, style: const TextStyle(color: Color(0xFFA9A8AD), fontSize: 20)),
-        if (onTap != null) const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.chevron_right, color: Color(0xFFA9A8AD))),
-      ]),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: onTap == null ? const Color(0xFF808084) : Colors.white,
+              fontSize: 20,
+            ),
+          ),
+          const Spacer(),
+          if (value.isNotEmpty)
+            Text(
+              value,
+              style: const TextStyle(color: Color(0xFFA9A8AD), fontSize: 20),
+            ),
+          if (onTap != null)
+            const Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Icon(Icons.chevron_right, color: Color(0xFFA9A8AD)),
+            ),
+        ],
+      ),
     ),
   );
 }
@@ -588,7 +834,11 @@ class _ChoiceOption<T> {
 }
 
 class _ChoiceSheet<T> extends StatelessWidget {
-  const _ChoiceSheet({required this.title, required this.value, required this.options});
+  const _ChoiceSheet({
+    required this.title,
+    required this.value,
+    required this.options,
+  });
   final String title;
   final T value;
   final List<_ChoiceOption<T>> options;
@@ -599,19 +849,41 @@ class _ChoiceSheet<T> extends StatelessWidget {
     child: Container(
       margin: const EdgeInsets.symmetric(horizontal: 66),
       padding: const EdgeInsets.fromLTRB(34, 12, 34, 28),
-      decoration: const BoxDecoration(color: Color(0xFF101114), borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+      decoration: const BoxDecoration(
+        color: Color(0xFF101114),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 42, height: 5, decoration: BoxDecoration(color: const Color(0xFF29292C), borderRadius: BorderRadius.circular(99))),
+          Container(
+            width: 42,
+            height: 5,
+            decoration: BoxDecoration(
+              color: const Color(0xFF29292C),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
           const SizedBox(height: 24),
-          Text(title, style: const TextStyle(color: Colors.white, fontSize: 25, fontWeight: FontWeight.w800)),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 25,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 12),
           for (final option in options)
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              title: Text(option.label, style: const TextStyle(color: Colors.white, fontSize: 18)),
-              trailing: option.value == value ? const Icon(Icons.check, color: Color(0xFFFFB800)) : null,
+              title: Text(
+                option.label,
+                style: const TextStyle(color: Colors.white, fontSize: 18),
+              ),
+              trailing: option.value == value
+                  ? const Icon(Icons.check, color: Color(0xFFFFB800))
+                  : null,
               onTap: () => Navigator.of(context).pop(option.value),
             ),
         ],
@@ -645,7 +917,8 @@ class _CastPickerSheetState extends State<_CastPickerSheet> {
     } on nvp_cast.CastDiscoveryException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      if (mounted) setState(() => _error = 'Could not search for Cast devices: $e');
+      if (mounted)
+        setState(() => _error = 'Could not search for Cast devices: $e');
     }
   }
 
@@ -655,27 +928,68 @@ class _CastPickerSheetState extends State<_CastPickerSheet> {
     child: Container(
       margin: const EdgeInsets.symmetric(horizontal: 40),
       padding: const EdgeInsets.fromLTRB(28, 12, 28, 28),
-      decoration: const BoxDecoration(color: Color(0xFF101114), borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
+      decoration: const BoxDecoration(
+        color: Color(0xFF101114),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 42, height: 5, decoration: BoxDecoration(color: const Color(0xFF29292C), borderRadius: BorderRadius.circular(99))),
+          Container(
+            width: 42,
+            height: 5,
+            decoration: BoxDecoration(
+              color: const Color(0xFF29292C),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
           const SizedBox(height: 24),
-          const Text('Cast to Device', style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
+          const Text(
+            'Cast to Device',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
           const SizedBox(height: 16),
           if (_error != null)
-            Padding(padding: const EdgeInsets.symmetric(vertical: 24), child: Text(_error!, style: const TextStyle(color: Color(0xFFA5A7AC)), textAlign: TextAlign.center))
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Text(
+                _error!,
+                style: const TextStyle(color: Color(0xFFA5A7AC)),
+                textAlign: TextAlign.center,
+              ),
+            )
           else if (_devices == null)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: CircularProgressIndicator())
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: CircularProgressIndicator(),
+            )
           else if (_devices!.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 24), child: Text('No Cast devices found on your network.', style: TextStyle(color: Color(0xFFA5A7AC))))
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Text(
+                'No Cast devices found on your network.',
+                style: TextStyle(color: Color(0xFFA5A7AC)),
+              ),
+            )
           else
             for (final device in _devices!)
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.cast, color: Colors.white),
-                title: Text(device.displayName, style: const TextStyle(color: Colors.white, fontSize: 17)),
-                subtitle: device.model != null ? Text(device.model!, style: const TextStyle(color: Color(0xFFA9A8AD))) : null,
+                title: Text(
+                  device.displayName,
+                  style: const TextStyle(color: Colors.white, fontSize: 17),
+                ),
+                subtitle: device.model != null
+                    ? Text(
+                        device.model!,
+                        style: const TextStyle(color: Color(0xFFA9A8AD)),
+                      )
+                    : null,
                 onTap: () => widget.onSelected(device),
               ),
         ],
@@ -685,7 +999,13 @@ class _CastPickerSheetState extends State<_CastPickerSheet> {
 }
 
 class _CastingView extends StatelessWidget {
-  const _CastingView({required this.device, required this.session, required this.title, required this.subtitle, required this.onStop});
+  const _CastingView({
+    required this.device,
+    required this.session,
+    required this.title,
+    required this.subtitle,
+    required this.onStop,
+  });
   final nvp_cast.CastDevice device;
   final nvp_cast.CastSession session;
   final String title;
@@ -708,9 +1028,22 @@ class _CastingView extends StatelessWidget {
         children: [
           const Icon(Icons.cast_connected, color: Color(0xFFFFB800), size: 64),
           const SizedBox(height: 20),
-          Text('Casting to ${device.displayName}', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800), textAlign: TextAlign.center),
+          Text(
+            'Casting to ${device.displayName}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+            ),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 6),
-          Text(title, style: const TextStyle(color: Color(0xFFAAA9AE), fontSize: 16), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(
+            title,
+            style: const TextStyle(color: Color(0xFFAAA9AE), fontSize: 16),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 32),
           StreamBuilder<nvp_cast.CastSessionStatus>(
             stream: session.statusStream,
@@ -719,25 +1052,51 @@ class _CastingView extends StatelessWidget {
               final status = snapshot.data ?? session.status;
               final duration = status.duration ?? Duration.zero;
               final maxMs = duration.inMilliseconds.toDouble();
-              final valueMs = status.position.inMilliseconds.toDouble().clamp(0.0, maxMs <= 0 ? 1.0 : maxMs);
+              final valueMs = status.position.inMilliseconds.toDouble().clamp(
+                0.0,
+                maxMs <= 0 ? 1.0 : maxMs,
+              );
               return Column(
                 children: [
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    IconButton(
-                      iconSize: 56,
-                      onPressed: status.isPlaying ? session.pause : session.play,
-                      icon: Icon(status.isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled, color: Colors.white),
-                    ),
-                  ]),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        iconSize: 56,
+                        onPressed: status.isPlaying
+                            ? session.pause
+                            : session.play,
+                        icon: Icon(
+                          status.isPlaying
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
                   Slider(
                     value: valueMs,
                     max: maxMs <= 0 ? 1 : maxMs,
-                    onChanged: maxMs <= 0 ? null : (value) => session.seek(Duration(milliseconds: value.round())),
+                    onChanged: maxMs <= 0
+                        ? null
+                        : (value) => session.seek(
+                            Duration(milliseconds: value.round()),
+                          ),
                   ),
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text(_format(status.position), style: const TextStyle(color: Colors.white70)),
-                    Text(_format(duration), style: const TextStyle(color: Colors.white70)),
-                  ]),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _format(status.position),
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      Text(
+                        _format(duration),
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  ),
                 ],
               );
             },
@@ -781,21 +1140,64 @@ class _TopBar extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800)),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 4),
-                  Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFAAA9AE), fontSize: 16, fontWeight: FontWeight.w600)),
+                  Text(
+                    subtitle!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFAAA9AE),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
               ],
             ),
           ),
-          IconButton(onPressed: onLock, icon: const Icon(Icons.lock_open, color: Color(0xFFD3D2D6), size: 26)),
+          IconButton(
+            onPressed: onLock,
+            icon: const Icon(
+              Icons.lock_open,
+              color: Color(0xFFD3D2D6),
+              size: 26,
+            ),
+          ),
           IconButton(
             onPressed: isAirplayAvailable ? onAirPlay : null,
-            icon: Icon(Icons.airplay, color: isAirplayConnected ? const Color(0xFFFFB800) : (isAirplayAvailable ? const Color(0xFFD3D2D6) : const Color(0xFF5A5A5E)), size: 31),
+            icon: Icon(
+              Icons.airplay,
+              color: isAirplayConnected
+                  ? const Color(0xFFFFB800)
+                  : (isAirplayAvailable
+                        ? const Color(0xFFD3D2D6)
+                        : const Color(0xFF5A5A5E)),
+              size: 31,
+            ),
           ),
-          IconButton(onPressed: onCast, icon: const Icon(Icons.cast_outlined, color: Color(0xFFD3D2D6), size: 31)),
-          IconButton(onPressed: onBack, icon: const Icon(Icons.close, color: Color(0xFFD3D2D6), size: 36)),
+          IconButton(
+            onPressed: onCast,
+            icon: const Icon(
+              Icons.cast_outlined,
+              color: Color(0xFFD3D2D6),
+              size: 31,
+            ),
+          ),
+          IconButton(
+            onPressed: onBack,
+            icon: const Icon(Icons.close, color: Color(0xFFD3D2D6), size: 36),
+          ),
         ],
       ),
     ),
@@ -830,15 +1232,26 @@ class _CenterControls extends StatelessWidget {
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            IconButton(iconSize: 42, onPressed: onPrevious, icon: const Icon(Icons.skip_previous, color: Color(0xFFC9C8CD))),
+            IconButton(
+              iconSize: 42,
+              onPressed: onPrevious,
+              icon: const Icon(Icons.skip_previous, color: Color(0xFFC9C8CD)),
+            ),
             const SizedBox(width: 66),
             IconButton(
               iconSize: 68,
               onPressed: onPlayPause,
-              icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
+              icon: Icon(
+                playing ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(width: 66),
-            IconButton(iconSize: 42, onPressed: onNext ?? onSeekForward, icon: const Icon(Icons.skip_next, color: Colors.white)),
+            IconButton(
+              iconSize: 42,
+              onPressed: onNext ?? onSeekForward,
+              icon: const Icon(Icons.skip_next, color: Colors.white),
+            ),
           ],
         );
       },
@@ -847,7 +1260,12 @@ class _CenterControls extends StatelessWidget {
 }
 
 class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.controller, required this.onSettings, required this.onToggleSubtitles, required this.subtitlesOn});
+  const _BottomBar({
+    required this.controller,
+    required this.onSettings,
+    required this.onToggleSubtitles,
+    required this.subtitlesOn,
+  });
   final NativeVideoPlayerController controller;
   final VoidCallback onSettings;
   final VoidCallback? onToggleSubtitles;
@@ -878,10 +1296,23 @@ class _BottomBar extends StatelessWidget {
                 if (onToggleSubtitles != null)
                   IconButton(
                     onPressed: onToggleSubtitles,
-                    icon: Icon(subtitlesOn ? Icons.closed_caption : Icons.closed_caption_outlined, color: const Color(0xFFD3D2D6), size: 31),
+                    icon: Icon(
+                      subtitlesOn
+                          ? Icons.closed_caption
+                          : Icons.closed_caption_outlined,
+                      color: const Color(0xFFD3D2D6),
+                      size: 31,
+                    ),
                   ),
                 const SizedBox(width: 18),
-                IconButton(onPressed: onSettings, icon: const Icon(Icons.settings, color: Color(0xFFD3D2D6), size: 34)),
+                IconButton(
+                  onPressed: onSettings,
+                  icon: const Icon(
+                    Icons.settings,
+                    color: Color(0xFFD3D2D6),
+                    size: 34,
+                  ),
+                ),
               ],
             ),
             StreamBuilder<Duration>(
@@ -895,11 +1326,26 @@ class _BottomBar extends StatelessWidget {
                   builder: (context, durationSnapshot) {
                     final duration = durationSnapshot.data ?? Duration.zero;
                     final maxMs = duration.inMilliseconds.toDouble();
-                    final valueMs = position.inMilliseconds.toDouble().clamp(0.0, maxMs <= 0 ? 1.0 : maxMs);
-                    final remaining = duration > position ? duration - position : Duration.zero;
+                    final valueMs = position.inMilliseconds.toDouble().clamp(
+                      0.0,
+                      maxMs <= 0 ? 1.0 : maxMs,
+                    );
+                    final remaining = duration > position
+                        ? duration - position
+                        : Duration.zero;
                     return Row(
                       children: [
-                        SizedBox(width: 76, child: Text(_format(position), style: const TextStyle(color: Colors.white, fontSize: 18), textAlign: TextAlign.left)),
+                        SizedBox(
+                          width: 76,
+                          child: Text(
+                            _format(position),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                            ),
+                            textAlign: TextAlign.left,
+                          ),
+                        ),
                         Expanded(
                           child: SliderTheme(
                             data: SliderThemeData(
@@ -907,24 +1353,44 @@ class _BottomBar extends StatelessWidget {
                               inactiveTrackColor: const Color(0xFF5D5D60),
                               trackHeight: 8,
                               thumbColor: Colors.white,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 16),
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 16,
+                              ),
                               overlayShape: SliderComponentShape.noOverlay,
                             ),
                             child: Slider(
                               value: valueMs,
                               max: maxMs <= 0 ? 1 : maxMs,
-                              onChanged: maxMs <= 0 ? null : (value) => controller.seekTo(Duration(milliseconds: value.round())),
+                              onChanged: maxMs <= 0
+                                  ? null
+                                  : (value) => controller.seekTo(
+                                      Duration(milliseconds: value.round()),
+                                    ),
                             ),
                           ),
                         ),
-                        SizedBox(width: 86, child: Text('-${_format(remaining)}', style: const TextStyle(color: Colors.white, fontSize: 18), textAlign: TextAlign.right)),
+                        SizedBox(
+                          width: 86,
+                          child: Text(
+                            '-${_format(remaining)}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                            ),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
                       ],
                     );
                   },
                 );
               },
             ),
-            const Icon(Icons.keyboard_arrow_down, color: Color(0xFFD3D2D6), size: 28),
+            const Icon(
+              Icons.keyboard_arrow_down,
+              color: Color(0xFFD3D2D6),
+              size: 28,
+            ),
           ],
         ),
       ),
