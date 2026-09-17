@@ -18,6 +18,7 @@ class SettingsScreen extends StatelessWidget {
             _SettingsRow(title: 'Account', subtitle: session.username, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountScreen(session: session, settings: settings)))),
             _SettingsRow(title: 'Appearance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AppearanceScreen(settings: settings)))),
             _SettingsRow(title: 'Playback', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlaybackScreen(settings: settings)))),
+            _SettingsRow(title: 'Ratings', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RatingsScreen(settings: settings)))),
             _SettingsRow(title: 'About', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen()))),
           ],
         ),
@@ -211,6 +212,55 @@ class PlaybackScreen extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      );
+}
+
+class RatingsScreen extends StatefulWidget {
+  const RatingsScreen({super.key, required this.settings});
+  final SettingsController settings;
+
+  @override
+  State<RatingsScreen> createState() => _RatingsScreenState();
+}
+
+class _RatingsScreenState extends State<RatingsScreen> {
+  late final _controller = TextEditingController(text: widget.settings.omdbApiKey);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('RATINGS', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const Text('IMDb Ratings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            const Text(
+              'Jellyfin\'s own rating is whatever its metadata provider set — usually TheTVDB for TV shows or TMDB for movies. '
+              'To also show a real IMDb rating, get a free API key at omdbapi.com and paste it here.',
+              style: TextStyle(color: Color(0xFFA5A7AC)),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _controller,
+              decoration: const InputDecoration(labelText: 'OMDB API Key', border: OutlineInputBorder()),
+              onSubmitted: (value) => widget.settings.setOmdbApiKey(value.trim()),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                widget.settings.setOmdbApiKey(_controller.text.trim());
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved')));
+              },
+              child: const Text('Save'),
+            ),
+          ],
         ),
       );
 }

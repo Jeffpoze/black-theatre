@@ -61,6 +61,7 @@ class SettingsController extends ChangeNotifier {
   static const _categorySortPrefix = 'settings.sort.';
   static const _skipSecondsKey = 'settings.skipSeconds';
   static const _defaultQualityKey = 'settings.defaultQuality';
+  static const _omdbApiKeyKey = 'settings.omdbApiKey';
 
   Color _accentColor = accentColorOptions.first.color;
   Color get accentColor => _accentColor;
@@ -70,6 +71,14 @@ class SettingsController extends ChangeNotifier {
 
   String _defaultQuality = 'original';
   String get defaultQuality => _defaultQuality;
+
+  // Free key from omdbapi.com — used to fetch a real IMDb rating (and a
+  // Rotten Tomatoes critic score, where OMDB has one) client-side, since
+  // Jellyfin's own CommunityRating is normally just whatever its TMDB
+  // provider set. Stored locally only; never hardcoded into source since
+  // this repo is public.
+  String _omdbApiKey = '';
+  String get omdbApiKey => _omdbApiKey;
 
   final Map<String, SortOption> _categorySort = {};
 
@@ -83,6 +92,7 @@ class SettingsController extends ChangeNotifier {
     if (storedSkip != null && skipIntervalOptions.contains(storedSkip)) _skipSeconds = storedSkip;
     final storedQuality = prefs.getString(_defaultQualityKey);
     if (storedQuality != null && defaultQualityOptions.contains(storedQuality)) _defaultQuality = storedQuality;
+    _omdbApiKey = prefs.getString(_omdbApiKeyKey) ?? '';
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(_categorySortPrefix)) continue;
       final id = key.substring(_categorySortPrefix.length);
@@ -112,6 +122,13 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_defaultQualityKey, quality);
+  }
+
+  Future<void> setOmdbApiKey(String key) async {
+    _omdbApiKey = key;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_omdbApiKeyKey, key);
   }
 
   Future<void> setSortFor(String categoryId, SortOption option) async {

@@ -149,6 +149,24 @@ class JellyfinApiService {
     return '$cleanUrl/Videos/$itemId/master.m3u8?$query';
   }
 
+  // Offline download only ever does a single plain HTTP GET to one URL (no
+  // HLS/segment support), so it needs a single complete file:
+  // - Already-compatible container (mp4/m4v/mov, matching the
+  //   DirectPlayProfile restriction): the static original file, no server
+  //   work needed.
+  // - Anything else (mkv, avi, etc.): a forced progressive single-file
+  //   transcode to mp4 — Jellyfin streams the encode as it happens rather
+  //   than pre-generating segments, which is exactly what a plain GET can
+  //   save straight to disk. Slower and loads the server, but works for
+  //   everything.
+  static String getDownloadUrl(String serverUrl, String itemId, String token, {required bool needsTranscode}) {
+    final cleanUrl = serverUrl.trim().replaceAll(RegExp(r'/*$'), '');
+    if (!needsTranscode) {
+      return '$cleanUrl/Videos/$itemId/stream?Static=true&api_key=${Uri.encodeQueryComponent(token)}';
+    }
+    return '$cleanUrl/Videos/$itemId/stream.mp4?Static=false&VideoCodec=h264&AudioCodec=aac&api_key=${Uri.encodeQueryComponent(token)}';
+  }
+
   // The real mechanism Jellyfin clients use to avoid an unnecessary
   // transcode: post a DeviceProfile describing what the player can decode
   // (modeled on Jellyfin's own official Swiftfin client's VLC/ffmpeg-backed
@@ -731,7 +749,7 @@ class JellyfinApiService {
     final cleanUrl = _normalizeUrl(serverUrl);
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items/$itemId').replace(
       queryParameters: {
-        'Fields': 'Overview,Genres,Studios,People,PrimaryImageTag,ImageTags,BackdropImageTags,CommunityRating,CriticRating,OfficialRating,PremiereDate,ProductionYear,EndDate,Status,RunTimeTicks',
+        'Fields': 'Overview,Genres,Studios,People,PrimaryImageTag,ImageTags,BackdropImageTags,CommunityRating,CriticRating,OfficialRating,PremiereDate,ProductionYear,EndDate,Status,RunTimeTicks,ProviderIds',
       },
     );
     final response = await _client.get(uri, headers: authHeaders(token));

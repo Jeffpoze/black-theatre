@@ -44,6 +44,7 @@ class PlayerScreen extends StatefulWidget {
     this.onNext,
     this.isAudioOnly = false,
     required this.settings,
+    this.localFilePath,
   });
   final String title;
   final String? subtitle;
@@ -55,6 +56,9 @@ class PlayerScreen extends StatefulWidget {
   final VoidCallback? onNext;
   final bool isAudioOnly;
   final SettingsController settings;
+  // When set, plays this local file directly instead of streaming — no
+  // Jellyfin session negotiation, progress reporting, or network URL at all.
+  final String? localFilePath;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -109,7 +113,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller.addActivityListener(_handleActivityEvent);
     _controller.addAirPlayAvailabilityListener(_handleAirPlayAvailability);
     _controller.addAirPlayConnectionListener(_handleAirPlayConnection);
-    if (!widget.isAudioOnly) {
+    if (!widget.isAudioOnly && widget.localFilePath == null) {
       // Jellyfin's transcode has its own idle "kill timer" that tears down
       // the ffmpeg process if it stops hearing from the client — server logs
       // showed exactly this happening mid-playback, since we never sent any
@@ -142,7 +146,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (mounted) setState(() => _error = 'Failed to start the player.\n$e');
       return;
     }
-    if (!widget.isAudioOnly) {
+    if (!widget.isAudioOnly && widget.localFilePath == null) {
       try {
         final streams = await _api.getMediaStreams(
           widget.serverUrl,
@@ -157,6 +161,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _openStream({required Duration position}) async {
+    final localPath = widget.localFilePath;
+    if (localPath != null) {
+      // Fully offline: no Jellyfin session to negotiate or report progress
+      // to. Watch state for this playback syncs next time the item is
+      // streamed normally, same as any offline-capable client.
+      _hasOpenedStreamBefore = true;
+      await _controller.load(url: 'file://$localPath', startAt: position, force: true);
+      if (_speed != 1.0) await _controller.setSpeed(_speed);
+      return;
+    }
     // Reopening (quality/subtitle change, or Retry) without telling Jellyfin
     // the previous session ended can leave its transcode job running
     // alongside the new one — two ffmpeg jobs competing for the same CPU is
@@ -584,7 +598,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller.removeAirPlayConnectionListener(_handleAirPlayConnection);
     _castStatusSub?.cancel();
     _castSession?.close();
-    if (!widget.isAudioOnly) {
+    if (!widget.isAudioOnly && widget.localFilePath == null) {
       final position =
           _castSession?.status.position ?? _controller.currentPosition;
       _api.reportPlaybackStopped(

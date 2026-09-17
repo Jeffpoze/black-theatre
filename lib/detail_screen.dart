@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'dart:ui';
 
+import 'package:better_native_video_player/better_native_video_player.dart' show VideoDownloadStatus;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
+import 'download_manager.dart';
 import 'manage_screen.dart';
 import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
@@ -43,6 +47,11 @@ class _DetailScreenState extends State<DetailScreen> {
   bool _favoriteBusy = false;
   bool _watchedBusy = false;
   bool _isAdmin = false;
+  String? _imdbRating;
+  String? _rottenTomatoesRating;
+  bool _isDownloaded = false;
+  // null = not downloading, -1 = downloading with unknown size, 0..1 = progress
+  double? _downloadProgress;
 
   @override
   void initState() {
@@ -65,6 +74,10 @@ class _DetailScreenState extends State<DetailScreen> {
       } else {
         _loadTechStreams(widget.itemId);
       }
+      _loadExternalRatings(item);
+      DownloadManager.instance.isDownloaded(widget.itemId).then((downloaded) {
+        if (mounted) setState(() => _isDownloaded = downloaded);
+      });
     } catch (error) {
       if (mounted) setState(() { _isLoading = false; _error = 'Unable to load details.\n$error'; });
     }
@@ -73,6 +86,38 @@ class _DetailScreenState extends State<DetailScreen> {
       if (mounted) setState(() => _isAdmin = isAdmin);
     } catch (_) {
       // Admin-only actions just stay hidden if this check fails.
+    }
+  }
+
+  // Jellyfin's own CommunityRating is just whatever its configured metadata
+  // provider set (often TheTVDB for TV libraries, TMDB for movie libraries)
+  // — it doesn't expose a separate, named-source rating. A real IMDb rating
+  // needs an external lookup: OMDB (omdbapi.com), keyed off the IMDb id
+  // Jellyfin already stores, gives back both an IMDb rating and (where OMDB
+  // has one) a Rotten Tomatoes critic score in the same call. No-ops if the
+  // user hasn't set an OMDB key in Settings.
+  Future<void> _loadExternalRatings(Map<String, dynamic> item) async {
+    final apiKey = widget.settings.omdbApiKey;
+    if (apiKey.isEmpty) return;
+    final providerIds = item['ProviderIds'] as Map<String, dynamic>?;
+    final imdbId = _asString(providerIds?['Imdb']);
+    if (imdbId == null || imdbId.isEmpty) return;
+    try {
+      final response = await http.get(Uri.parse('https://www.omdbapi.com/?i=$imdbId&apikey=$apiKey'));
+      if (response.statusCode != 200) return;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['Response'] == 'False') return;
+      final imdbRating = _asString(data['imdbRating']);
+      final ratings = (data['Ratings'] as List<dynamic>?)?.whereType<Map<String, dynamic>>();
+      final rt = ratings?.firstWhereOrNull((r) => r['Source'] == 'Rotten Tomatoes');
+      if (!mounted) return;
+      setState(() {
+        if (imdbRating != null && imdbRating != 'N/A') _imdbRating = imdbRating;
+        final rtValue = _asString(rt?['Value']);
+        if (rtValue != null) _rottenTomatoesRating = rtValue;
+      });
+    } catch (_) {
+      // Ratings are a nice-to-have; a network hiccup shouldn't show an error.
     }
   }
 
@@ -158,6 +203,96 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> _toggleWatched() => _setWatched(!_isWatched);
 
+  Future<void> _openRateDialog() async {
+    if (!_isAdmin) {
+      _showUnavailable('Rating');
+      return;
+    }
+    final item = _item;
+    if (item == null) return;
+    final current = _asNum(item['CommunityRating'])?.toDouble() ?? 5.0;
+    final result = await showDialog<double>(
+      context: context,
+      builder: (context) => _RatingDialog(initialValue: current),
+    );
+    if (result == null) return;
+    try {
+      final fullItem = await _api.getItemForEdit(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+      fullItem['CommunityRating'] = result;
+      await _api.updateItemMetadata(widget.serverUrl, widget.token, widget.itemId, fullItem);
+      if (mounted) await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save rating: $e')));
+    }
+  }
+
+  Future<void> _toggleDownload() async {
+    final item = _item;
+    if (item == null) return;
+    final isSeries = item['Type'] == 'Series';
+    final isContainer = !isSeries && item['IsFolder'] == true;
+    if (isSeries || isContainer) {
+      _showUnavailable('Downloading from this page');
+      return;
+    }
+    if (_isDownloaded) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Remove Download?'),
+          content: const Text('This deletes the downloaded file from your device.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Remove')),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        await DownloadManager.instance.remove(widget.itemId);
+        if (mounted) setState(() => _isDownloaded = false);
+      }
+      return;
+    }
+    if (_downloadProgress != null) {
+      await DownloadManager.instance.cancel(widget.itemId);
+      if (mounted) setState(() => _downloadProgress = null);
+      return;
+    }
+    setState(() => _downloadProgress = -1);
+    try {
+      Map<String, dynamic>? source;
+      try {
+        source = await _api.getFileInfo(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+      } catch (_) {}
+      final container = (_asString(source?['Container']) ?? '').toLowerCase();
+      final needsTranscode = !['mp4', 'm4v', 'mov'].contains(container);
+      final url = JellyfinApiService.getDownloadUrl(widget.serverUrl, widget.itemId, widget.token, needsTranscode: needsTranscode);
+      final stream = await DownloadManager.instance.download(widget.itemId, url, JellyfinApiService.authHeaders(widget.token));
+      await for (final progress in stream) {
+        if (!mounted) return;
+        switch (progress.status) {
+          case VideoDownloadStatus.downloading:
+            setState(() => _downloadProgress = progress.fraction ?? -1);
+          case VideoDownloadStatus.completed:
+            setState(() {
+              _isDownloaded = true;
+              _downloadProgress = null;
+            });
+          case VideoDownloadStatus.failed:
+            setState(() => _downloadProgress = null);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: ${progress.error}')));
+          case VideoDownloadStatus.canceled:
+            setState(() => _downloadProgress = null);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _downloadProgress = null);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
+    }
+  }
+
   // Server logs showed two independent transcode jobs spun up ~15s apart
   // for the same file, each competing for CPU with the other and likely
   // starving both. That's consistent with a double-tap on Watch/an episode
@@ -166,11 +301,16 @@ class _DetailScreenState extends State<DetailScreen> {
   // independently negotiating its own Jellyfin session. Guard against it.
   bool _isOpeningPlayer = false;
 
-  void _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false, bool isAudioOnly = false}) {
+  Future<void> _play(String itemId, String title, {String? subtitle, Duration startPosition = Duration.zero, VoidCallback? onNext, bool replace = false, bool isAudioOnly = false}) async {
     if (_isOpeningPlayer) return;
     _isOpeningPlayer = true;
+    String? localFilePath;
+    if (itemId == widget.itemId && _isDownloaded) {
+      localFilePath = await DownloadManager.instance.localPathFor(itemId);
+    }
+    if (!mounted) return;
     final route = MaterialPageRoute<void>(
-      builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext, isAudioOnly: isAudioOnly, settings: widget.settings),
+      builder: (_) => PlayerScreen(title: title, subtitle: subtitle, serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: itemId, startPosition: startPosition, onNext: onNext, isAudioOnly: isAudioOnly, settings: widget.settings, localFilePath: localFilePath),
     );
     final future = replace ? Navigator.of(context).pushReplacement(route) : Navigator.of(context).push(route);
     future.then((_) {
@@ -545,7 +685,9 @@ class _DetailScreenState extends State<DetailScreen> {
                     Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       if (year != null) Text(year, style: const TextStyle(color: Color(0xFFA5A7AC))),
                       if (officialRating != null) _RatingPill(text: officialRating),
-                      if (communityRating != null) _RatingBadge(icon: Icons.star, color: Colors.amber, value: communityRating.toStringAsFixed(1)),
+                      if (_imdbRating != null) _SourceBadge(label: 'IMDb', value: _imdbRating!, labelColor: const Color(0xFFF5C518), labelTextColor: Colors.black),
+                      if (_rottenTomatoesRating != null) _SourceBadge(label: 'RT', value: _rottenTomatoesRating!, labelColor: const Color(0xFFFA320A), labelTextColor: Colors.white),
+                      if (communityRating != null) _SourceBadge(label: 'TVDB', value: communityRating.toStringAsFixed(1), labelColor: const Color(0xFF6CD591), labelTextColor: Colors.black),
                       if (criticRating != null) _RatingBadge(icon: Icons.local_movies, color: const Color(0xFFFF5252), value: '${criticRating.round()}%'),
                     ]),
                   const SizedBox(height: 20),
@@ -563,9 +705,11 @@ class _DetailScreenState extends State<DetailScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       _ActionButton(icon: _isFavorite ? Icons.bookmark : Icons.bookmark_border, label: 'Watchlist', active: _isFavorite, onTap: _toggleFavorite),
-                      _ActionButton(icon: Icons.star_border_rounded, label: 'Rate', active: false, onTap: () => _showUnavailable('Ratings')),
+                      _ActionButton(icon: Icons.star_border_rounded, label: 'Rate', active: false, onTap: _openRateDialog),
                       _ActionButton(icon: _isWatched ? Icons.check_circle : Icons.check_circle_outline, label: 'Watched', active: _isWatched, onTap: _toggleWatched),
-                      _ActionButton(icon: Icons.download_outlined, label: 'Download', active: false, onTap: () => _showUnavailable('Downloads')),
+                      _downloadProgress != null
+                          ? _ActionButtonProgress(progress: _downloadProgress == -1 ? null : _downloadProgress, onTap: _toggleDownload)
+                          : _ActionButton(icon: _isDownloaded ? Icons.download_done : Icons.download_outlined, label: _isDownloaded ? 'Downloaded' : 'Download', active: _isDownloaded, onTap: _toggleDownload),
                       _ActionButton(icon: Icons.more_vert, label: 'More', active: false, onTap: _openMoreActions),
                     ],
                   ),
@@ -692,6 +836,29 @@ class _RatingPill extends StatelessWidget {
       );
 }
 
+class _SourceBadge extends StatelessWidget {
+  const _SourceBadge({required this.label, required this.value, required this.labelColor, required this.labelTextColor});
+  final String label;
+  final String value;
+  final Color labelColor;
+  final Color labelTextColor;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(color: Colors.black.withValues(alpha: .35), borderRadius: BorderRadius.circular(4)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+            decoration: BoxDecoration(color: labelColor, borderRadius: BorderRadius.circular(3)),
+            child: Text(label, style: TextStyle(color: labelTextColor, fontSize: 10, fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(width: 5),
+          Text(value, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+        ]),
+      );
+}
+
 class _RatingBadge extends StatelessWidget {
   const _RatingBadge({required this.icon, required this.color, required this.value});
   final IconData icon;
@@ -727,6 +894,58 @@ class _ActionButton extends StatelessWidget {
           const SizedBox(height: 6),
           Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
         ]),
+      );
+}
+
+class _ActionButtonProgress extends StatelessWidget {
+  const _ActionButtonProgress({required this.progress, required this.onTap});
+  final double? progress;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: Stack(alignment: Alignment.center, children: [
+              CircularProgressIndicator(value: progress, strokeWidth: 2.5, color: Colors.white70),
+              const Icon(Icons.close, size: 16, color: Colors.white70),
+            ]),
+          ),
+          const SizedBox(height: 6),
+          Text(progress == null ? 'Downloading' : '${(progress! * 100).round()}%', style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
+        ]),
+      );
+}
+
+class _RatingDialog extends StatefulWidget {
+  const _RatingDialog({required this.initialValue});
+  final double initialValue;
+
+  @override
+  State<_RatingDialog> createState() => _RatingDialogState();
+}
+
+class _RatingDialogState extends State<_RatingDialog> {
+  late double _value = widget.initialValue;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Rate'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_value.toStringAsFixed(1), style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w700)),
+            Slider(value: _value, min: 0, max: 10, divisions: 20, onChanged: (v) => setState(() => _value = v)),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(_value), child: const Text('Save')),
+        ],
       );
 }
 
