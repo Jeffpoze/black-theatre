@@ -658,28 +658,142 @@ class _CategoryGrid extends StatelessWidget {
           style: TextStyle(color: Color(0xFFA5A7AC)),
         ),
       );
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 16,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.66,
-      ),
-      itemCount: items.length,
-      itemBuilder: (_, index) => ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: MediaPoster(
-          item: items[index],
-          serverUrl: serverUrl,
-          userId: userId,
-          token: token,
-          fill: true,
-          settings: settings,
-        ),
-      ),
-    );
+    return _ScrubbableGrid(items: items, serverUrl: serverUrl, userId: userId, token: token, settings: settings);
   }
+}
+
+// A right-edge drag strip that jumps the grid to a proportional position and
+// shows the current row's leading letter in a floating bubble while
+// dragging — same pattern as Contacts' A-Z index, but position-based rather
+// than a real per-letter index (works regardless of current sort order).
+class _ScrubbableGrid extends StatefulWidget {
+  const _ScrubbableGrid({required this.items, required this.serverUrl, required this.userId, required this.token, required this.settings});
+  final List<dynamic> items;
+  final String serverUrl;
+  final String userId;
+  final String token;
+  final SettingsController settings;
+
+  @override
+  State<_ScrubbableGrid> createState() => _ScrubbableGridState();
+}
+
+class _ScrubbableGridState extends State<_ScrubbableGrid> {
+  static const _crossAxisCount = 3;
+  static const _mainAxisSpacing = 16.0;
+  static const _crossAxisSpacing = 12.0;
+  static const _childAspectRatio = 0.66;
+  static const _padding = 16.0;
+
+  final _scrollController = ScrollController();
+  double? _dragFraction;
+  String? _dragLetter;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  String _letterFor(int index) {
+    final item = widget.items[index];
+    final name = item is Map<String, dynamic> ? item['Name'] as String? : null;
+    if (name == null || name.isEmpty) return '#';
+    final letter = name[0].toUpperCase();
+    return RegExp(r'[A-Z]').hasMatch(letter) ? letter : '#';
+  }
+
+  double _rowHeightFor(double width) {
+    final gridWidth = width - _padding * 2;
+    final itemWidth = (gridWidth - _crossAxisSpacing * (_crossAxisCount - 1)) / _crossAxisCount;
+    final itemHeight = itemWidth / _childAspectRatio;
+    return itemHeight + _mainAxisSpacing;
+  }
+
+  void _onDrag(double localY, double stripHeight, double width) {
+    final fraction = (localY / stripHeight).clamp(0.0, 1.0);
+    final index = (fraction * (widget.items.length - 1)).round().clamp(0, widget.items.length - 1);
+    final rowHeight = _rowHeightFor(width);
+    final row = index ~/ _crossAxisCount;
+    final maxScroll = _scrollController.position.maxScrollExtent;
+    final targetOffset = (row * rowHeight).clamp(0.0, maxScroll);
+    _scrollController.jumpTo(targetOffset);
+    setState(() {
+      _dragFraction = fraction;
+      _dragLetter = _letterFor(index);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) => Stack(
+      children: [
+        GridView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.all(_padding),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: _crossAxisCount,
+            mainAxisSpacing: _mainAxisSpacing,
+            crossAxisSpacing: _crossAxisSpacing,
+            childAspectRatio: _childAspectRatio,
+          ),
+          itemCount: widget.items.length,
+          itemBuilder: (_, index) => ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: MediaPoster(
+              item: widget.items[index],
+              serverUrl: widget.serverUrl,
+              userId: widget.userId,
+              token: widget.token,
+              fill: true,
+              settings: widget.settings,
+            ),
+          ),
+        ),
+        if (widget.items.length > 12)
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 28,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onVerticalDragStart: (details) => _onDrag(details.localPosition.dy, constraints.maxHeight, constraints.maxWidth),
+              onVerticalDragUpdate: (details) => _onDrag(details.localPosition.dy, constraints.maxHeight, constraints.maxWidth),
+              onVerticalDragEnd: (_) => setState(() {
+                _dragFraction = null;
+                _dragLetter = null;
+              }),
+              child: _dragFraction == null
+                  ? const SizedBox.expand()
+                  : Container(
+                      margin: const EdgeInsets.symmetric(vertical: 40),
+                      decoration: BoxDecoration(color: Colors.black38, borderRadius: BorderRadius.circular(14)),
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Icon(Icons.keyboard_arrow_up, size: 18, color: Colors.white70)),
+                          Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Icon(Icons.keyboard_arrow_down, size: 18, color: Colors.white70)),
+                        ],
+                      ),
+                    ),
+            ),
+          ),
+        if (_dragFraction != null && _dragLetter != null)
+          Positioned(
+            right: 44,
+            top: (_dragFraction! * (constraints.maxHeight - 64)).clamp(0.0, constraints.maxHeight - 64),
+            child: Container(
+              width: 56,
+              height: 56,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(color: Colors.black87, shape: BoxShape.circle),
+              child: Text(_dragLetter!, style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w700)),
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 class _HeroPlaceholder extends StatelessWidget {

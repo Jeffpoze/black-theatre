@@ -675,7 +675,7 @@ class JellyfinApiService {
         'SearchTerm': query,
         'Recursive': 'true',
         'IncludeItemTypes': 'Movie,Series,Episode,Audio,MusicAlbum,BoxSet',
-        'Limit': '100',
+        'Limit': '60',
         'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,AlbumPrimaryImageTag,AlbumId,ProductionYear,EndDate,Status',
       },
     );
