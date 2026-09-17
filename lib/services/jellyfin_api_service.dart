@@ -181,6 +181,21 @@ class JellyfinApiService {
       'DirectPlayProfiles': [
         {
           'Type': 'Video',
+          // This profile was originally modeled on Swiftfin's VLC/ffmpeg
+          // backend (media_kit's mpv is also ffmpeg-based), which reads
+          // essentially any container directly — so it never restricted
+          // Container here. Now that playback goes through a real native
+          // AVPlayer, that's actively wrong: AVPlayer cannot open Matroska
+          // at all. Without this restriction, Jellyfin offered Direct Play
+          // for an .mkv source with compatible codecs, we built a plain
+          // static-file URL for it (content-type video/x-matroska,
+          // confirmed via direct HTTP fetch), and handed that straight to
+          // AVPlayer — which fails immediately with a generic "Cannot Open"
+          // (AVFoundation error -11829). Restricting Container to what
+          // AVPlayer/ExoPlayer actually support makes Jellyfin correctly
+          // fall back to a Direct Stream (cheap container remux into HLS,
+          // no re-encode) for anything else.
+          'Container': 'mp4,m4v,mov',
           'AudioCodec': audioCodecs,
           'VideoCodec':
               'av1,dirac,dv,ffv1,flv1,h261,h263,h264,hevc,mjpeg,mpeg1video,'
