@@ -663,23 +663,57 @@ class JellyfinApiService {
     };
   }
 
+  Future<List<dynamic>> searchItems(
+    String serverUrl,
+    String userId,
+    String token,
+    String query,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
+      queryParameters: {
+        'SearchTerm': query,
+        'Recursive': 'true',
+        'IncludeItemTypes': 'Movie,Series,Episode,Audio,MusicAlbum,BoxSet',
+        'Limit': '100',
+        'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,AlbumPrimaryImageTag,AlbumId,ProductionYear,EndDate,Status',
+      },
+    );
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      print('searchItems failed for "$query": ${response.statusCode} ${response.body}');
+      throw Exception('Search failed.');
+    }
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
   Future<List<dynamic>> getLibraryItems(
     String serverUrl,
     String userId,
     String token,
     String viewId, {
     required SortOption sort,
+    LibraryFilter? filter,
   }) async {
     final cleanUrl = _normalizeUrl(serverUrl);
+    final itemFilters = ['IsNotFolder', if (filter?.unwatchedOnly == true) 'IsUnplayed'];
+    final yearParam = filter?.year == null ? null : '${filter!.year}';
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
       queryParameters: {
         'ParentId': viewId,
         'SortBy': sort.jellyfinSortBy,
         'SortOrder': sort.jellyfinSortOrder,
         'Recursive': 'true',
-        'Filters': 'IsNotFolder',
+        'Filters': itemFilters.join(','),
         'Limit': '200',
         'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,AlbumPrimaryImageTag,AlbumId,PremiereDate,ProductionYear,EndDate,Status,CommunityRating',
+        'Genres': ?filter?.genre,
+        'Years': ?yearParam,
+        'OfficialRatings': ?filter?.officialRating,
+        'StudioIds': ?filter?.studioId,
+        'PersonIds': ?filter?.personId,
       },
     );
     final response = await _client.get(uri, headers: authHeaders(token));
@@ -692,6 +726,54 @@ class JellyfinApiService {
     final data = jsonDecode(response.body);
     if (data is Map<String, dynamic> && data['Items'] is List<dynamic>)
       return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
+  // The legacy endpoint (not /Items/Filters2, which has known bugs — it
+  // drops Years/OfficialRatings and always returns empty Tags) returns the
+  // Genres/Years/OfficialRatings actually present in this library, for
+  // building filter pickers.
+  Future<Map<String, dynamic>> getLibraryFilterOptions(
+    String serverUrl,
+    String userId,
+    String token,
+    String viewId,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Items/Filters').replace(queryParameters: {'userId': userId, 'parentId': viewId});
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) return const {};
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<List<dynamic>> getStudios(
+    String serverUrl,
+    String userId,
+    String token,
+    String viewId,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Studios').replace(queryParameters: {'userId': userId, 'parentId': viewId});
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
+    return const [];
+  }
+
+  Future<List<dynamic>> getPersons(
+    String serverUrl,
+    String userId,
+    String token,
+    String viewId,
+    String personType,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Persons').replace(queryParameters: {'userId': userId, 'parentId': viewId, 'personTypes': personType});
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+    final data = jsonDecode(response.body);
+    if (data is Map<String, dynamic> && data['Items'] is List<dynamic>) return data['Items'] as List<dynamic>;
     return const [];
   }
 

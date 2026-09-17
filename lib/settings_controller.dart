@@ -1,27 +1,88 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum SortOption { releaseNewest, releaseOldest, ratingHighToLow, aToZ, zToA }
+enum SortOption {
+  releaseNewest,
+  releaseOldest,
+  ratingHighToLow,
+  criticRatingHighToLow,
+  aToZ,
+  zToA,
+  year,
+  contentRating,
+  unwatchedFirst,
+  dateAdded,
+  dateWatched,
+  random,
+}
 
 extension SortOptionLabel on SortOption {
   String get label => switch (this) {
         SortOption.releaseNewest => 'Release Date (Newest)',
         SortOption.releaseOldest => 'Release Date (Oldest)',
-        SortOption.ratingHighToLow => 'Critic Rating',
+        SortOption.ratingHighToLow => 'Audience Rating',
+        SortOption.criticRatingHighToLow => 'Critic Rating',
         SortOption.aToZ => 'A-Z',
         SortOption.zToA => 'Z-A',
+        SortOption.year => 'Year',
+        SortOption.contentRating => 'Content Rating',
+        SortOption.unwatchedFirst => 'Unwatched',
+        SortOption.dateAdded => 'Date Added',
+        SortOption.dateWatched => 'Date Watched',
+        SortOption.random => 'Randomly',
       };
 
   String get jellyfinSortBy => switch (this) {
         SortOption.releaseNewest || SortOption.releaseOldest => 'PremiereDate,SortName',
         SortOption.ratingHighToLow => 'CommunityRating,SortName',
+        SortOption.criticRatingHighToLow => 'CriticRating,SortName',
         SortOption.aToZ || SortOption.zToA => 'SortName',
+        SortOption.year => 'ProductionYear,SortName',
+        SortOption.contentRating => 'OfficialRating,SortName',
+        SortOption.unwatchedFirst => 'IsPlayed,SortName',
+        SortOption.dateAdded => 'DateCreated,SortName',
+        SortOption.dateWatched => 'DatePlayed,SortName',
+        SortOption.random => 'Random',
       };
 
   String get jellyfinSortOrder => switch (this) {
-        SortOption.releaseNewest || SortOption.ratingHighToLow || SortOption.zToA => 'Descending',
-        SortOption.releaseOldest || SortOption.aToZ => 'Ascending',
+        SortOption.releaseOldest || SortOption.aToZ || SortOption.contentRating || SortOption.unwatchedFirst => 'Ascending',
+        SortOption.releaseNewest ||
+        SortOption.ratingHighToLow ||
+        SortOption.criticRatingHighToLow ||
+        SortOption.zToA ||
+        SortOption.year ||
+        SortOption.dateAdded ||
+        SortOption.dateWatched ||
+        SortOption.random =>
+          'Descending',
       };
+}
+
+// Session-only (not persisted) — filter state resets when you switch
+// categories or restart the app, same as most library browsers.
+class LibraryFilter {
+  const LibraryFilter({this.genre, this.year, this.officialRating, this.studioId, this.studioName, this.personId, this.personName, this.unwatchedOnly = false});
+  final String? genre;
+  final int? year;
+  final String? officialRating;
+  final String? studioId;
+  final String? studioName;
+  final String? personId;
+  final String? personName;
+  final bool unwatchedOnly;
+
+  bool get isActive => genre != null || year != null || officialRating != null || studioId != null || personId != null || unwatchedOnly;
+
+  String get label {
+    if (genre != null) return genre!;
+    if (year != null) return '$year';
+    if (officialRating != null) return officialRating!;
+    if (studioName != null) return studioName!;
+    if (personName != null) return personName!;
+    if (unwatchedOnly) return 'Unwatched';
+    return 'All';
+  }
 }
 
 class AccentColorOption {

@@ -11,6 +11,7 @@ import 'detail_screen.dart';
 import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
+import 'search_screen.dart';
 import 'settings_screen.dart';
 
 Future<void> main() async {
@@ -269,6 +270,7 @@ class _HomePageState extends State<HomePage> {
   final Set<String> _loadingCategoryIds = {};
   List<dynamic> _selectedCategoryItems = const [];
   bool _isLoadingSelectedCategory = false;
+  LibraryFilter? _selectedCategoryFilter;
 
   @override
   void initState() {
@@ -378,13 +380,17 @@ class _HomePageState extends State<HomePage> {
 
   void _selectCategory(String? id) {
     Navigator.of(context).pop();
-    setState(() => _selectedCategoryId = id);
+    setState(() {
+      _selectedCategoryId = id;
+      _selectedCategoryFilter = null;
+    });
     if (id != null) _loadSelectedCategory(id);
   }
 
   Future<void> _loadSelectedCategory(String id) async {
     setState(() => _isLoadingSelectedCategory = true);
     final sort = widget.settings.sortFor(id);
+    final filter = _selectedCategoryFilter;
     final items = await _loadSection(
       'selected category $id',
       () => _api.getLibraryItems(
@@ -393,6 +399,7 @@ class _HomePageState extends State<HomePage> {
         widget.session.token,
         id,
         sort: sort,
+        filter: filter,
       ),
     );
     if (!mounted || _selectedCategoryId != id) return;
@@ -406,6 +413,26 @@ class _HomePageState extends State<HomePage> {
     final id = _selectedCategoryId;
     if (id == null) return;
     widget.settings.setSortFor(id, option);
+    _loadSelectedCategory(id);
+  }
+
+  Future<void> _openFilterSheet() async {
+    final id = _selectedCategoryId;
+    if (id == null) return;
+    final filter = await showModalBottomSheet<LibraryFilter>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0A0B0D),
+      builder: (context) => _LibraryFilterSheet(
+        serverUrl: widget.session.serverUrl,
+        userId: widget.session.userId,
+        token: widget.session.token,
+        viewId: id,
+        current: _selectedCategoryFilter,
+      ),
+    );
+    if (filter == null) return;
+    setState(() => _selectedCategoryFilter = filter.isActive ? filter : null);
     _loadSelectedCategory(id);
   }
 
@@ -461,6 +488,11 @@ class _HomePageState extends State<HomePage> {
         ),
         actions: [
           if (_selectedCategoryId != null)
+            IconButton(
+              icon: Icon(Icons.filter_list, color: _selectedCategoryFilter != null ? Theme.of(context).colorScheme.primary : null),
+              onPressed: _openFilterSheet,
+            ),
+          if (_selectedCategoryId != null)
             PopupMenuButton<SortOption>(
               icon: const Icon(Icons.sort),
               onSelected: _changeSort,
@@ -469,7 +501,12 @@ class _HomePageState extends State<HomePage> {
                   PopupMenuItem(value: option, child: Text(option.label)),
               ],
             ),
-          IconButton(onPressed: () {}, icon: const Icon(Icons.search)),
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => SearchScreen(session: widget.session, settings: widget.settings)),
+            ),
+            icon: const Icon(Icons.search),
+          ),
         ],
       ),
       drawer: _CategoryDrawer(
@@ -632,7 +669,7 @@ class _CategoryGrid extends StatelessWidget {
       itemCount: items.length,
       itemBuilder: (_, index) => ClipRRect(
         borderRadius: BorderRadius.circular(6),
-        child: _MediaPoster(
+        child: MediaPoster(
           item: items[index],
           serverUrl: serverUrl,
           userId: userId,
@@ -943,7 +980,7 @@ class _MediaRow extends StatelessWidget {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   itemCount: items.length,
-                  itemBuilder: (_, index) => _MediaPoster(
+                  itemBuilder: (_, index) => MediaPoster(
                     item: items[index],
                     serverUrl: serverUrl,
                     userId: userId,
@@ -989,8 +1026,8 @@ class _PosterPlaceholder extends StatelessWidget {
   );
 }
 
-class _MediaPoster extends StatelessWidget {
-  const _MediaPoster({
+class MediaPoster extends StatelessWidget {
+  const MediaPoster({
     required this.item,
     required this.serverUrl,
     required this.userId,
@@ -1181,4 +1218,168 @@ class _DarkPosterPlaceholder extends StatelessWidget {
     color: const Color(0xFF17191D),
     child: const Icon(Icons.movie_outlined, color: Colors.white24, size: 32),
   );
+}
+
+enum _FilterCategory { none, genre, year, contentRating, studio, director, actor, writer, producer }
+
+class _LibraryFilterSheet extends StatefulWidget {
+  const _LibraryFilterSheet({required this.serverUrl, required this.userId, required this.token, required this.viewId, required this.current});
+  final String serverUrl;
+  final String userId;
+  final String token;
+  final String viewId;
+  final LibraryFilter? current;
+
+  @override
+  State<_LibraryFilterSheet> createState() => _LibraryFilterSheetState();
+}
+
+class _LibraryFilterSheetState extends State<_LibraryFilterSheet> {
+  final _api = JellyfinApiService();
+  _FilterCategory _view = _FilterCategory.none;
+  Map<String, dynamic>? _filterOptions;
+  List<dynamic>? _studios;
+  List<dynamic>? _persons;
+  bool _loadingSub = false;
+
+  Future<void> _ensureFilterOptions(_FilterCategory view) async {
+    setState(() => _view = view);
+    if (_filterOptions != null) return;
+    setState(() => _loadingSub = true);
+    final data = await _api.getLibraryFilterOptions(widget.serverUrl, widget.userId, widget.token, widget.viewId);
+    if (mounted) setState(() { _filterOptions = data; _loadingSub = false; });
+  }
+
+  Future<void> _loadStudios() async {
+    setState(() { _view = _FilterCategory.studio; _loadingSub = true; });
+    final data = await _api.getStudios(widget.serverUrl, widget.userId, widget.token, widget.viewId);
+    if (mounted) setState(() { _studios = data; _loadingSub = false; });
+  }
+
+  Future<void> _loadPersons(_FilterCategory view, String personType) async {
+    setState(() { _view = view; _loadingSub = true; _persons = null; });
+    final data = await _api.getPersons(widget.serverUrl, widget.userId, widget.token, widget.viewId, personType);
+    if (mounted) setState(() { _persons = data; _loadingSub = false; });
+  }
+
+  void _select(LibraryFilter filter) => Navigator.of(context).pop(filter);
+
+  Widget _header(String title, {VoidCallback? onBack}) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 12, 20, 8),
+        child: Row(children: [
+          if (onBack != null) IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 18), onPressed: onBack) else const SizedBox(width: 48),
+          Expanded(child: Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
+          const SizedBox(width: 48),
+        ]),
+      );
+
+  Widget _valueList(List<String> values, LibraryFilter Function(String) makeFilter) {
+    if (_loadingSub) return const Expanded(child: Center(child: CircularProgressIndicator()));
+    if (values.isEmpty) return const Expanded(child: Center(child: Text('Nothing to filter by here.', style: TextStyle(color: Color(0xFFA5A7AC)))));
+    return Expanded(
+      child: ListView(children: [for (final v in values) ListTile(title: Text(v), onTap: () => _select(makeFilter(v)))]),
+    );
+  }
+
+  Widget _personList(List<dynamic> persons, LibraryFilter Function(String id, String name) makeFilter) {
+    if (_loadingSub) return const Expanded(child: Center(child: CircularProgressIndicator()));
+    final list = persons.whereType<Map<String, dynamic>>().toList();
+    if (list.isEmpty) return const Expanded(child: Center(child: Text('Nothing to filter by here.', style: TextStyle(color: Color(0xFFA5A7AC)))));
+    return Expanded(
+      child: ListView(
+        children: [
+          for (final person in list)
+            ListTile(
+              title: Text((person['Name'] as String?) ?? ''),
+              onTap: () {
+                final id = person['Id'] as String?;
+                final name = person['Name'] as String?;
+                if (id != null && name != null) _select(makeFilter(id, name));
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _studioList() {
+    if (_loadingSub) return const Expanded(child: Center(child: CircularProgressIndicator()));
+    final list = (_studios ?? const []).whereType<Map<String, dynamic>>().toList();
+    if (list.isEmpty) return const Expanded(child: Center(child: Text('Nothing to filter by here.', style: TextStyle(color: Color(0xFFA5A7AC)))));
+    return Expanded(
+      child: ListView(
+        children: [
+          for (final studio in list)
+            ListTile(
+              title: Text((studio['Name'] as String?) ?? ''),
+              onTap: () {
+                final id = studio['Id'] as String?;
+                final name = studio['Name'] as String?;
+                if (id != null && name != null) _select(LibraryFilter(studioId: id, studioName: name));
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final genres = (_filterOptions?['Genres'] as List<dynamic>?)?.whereType<String>().toList() ?? const [];
+    final years = (_filterOptions?['Years'] as List<dynamic>?)?.map((y) => '$y').toList() ?? const [];
+    final officialRatings = (_filterOptions?['OfficialRatings'] as List<dynamic>?)?.whereType<String>().toList() ?? const [];
+
+    final body = switch (_view) {
+      _FilterCategory.none => Expanded(
+          child: ListView(
+            children: [
+              ListTile(title: const Text('All'), trailing: widget.current == null || !widget.current!.isActive ? const Icon(Icons.check) : null, onTap: () => _select(const LibraryFilter())),
+              ListTile(title: const Text('Unwatched'), trailing: widget.current?.unwatchedOnly == true ? const Icon(Icons.check) : null, onTap: () => _select(const LibraryFilter(unwatchedOnly: true))),
+              const Divider(height: 1, color: Color(0xFF1B1D22)),
+              ListTile(title: const Text('Genre'), trailing: const Icon(Icons.chevron_right), onTap: () => _ensureFilterOptions(_FilterCategory.genre)),
+              ListTile(title: const Text('Year'), trailing: const Icon(Icons.chevron_right), onTap: () => _ensureFilterOptions(_FilterCategory.year)),
+              ListTile(title: const Text('Content Rating'), trailing: const Icon(Icons.chevron_right), onTap: () => _ensureFilterOptions(_FilterCategory.contentRating)),
+              ListTile(title: const Text('Studio'), trailing: const Icon(Icons.chevron_right), onTap: _loadStudios),
+              ListTile(title: const Text('Director'), trailing: const Icon(Icons.chevron_right), onTap: () => _loadPersons(_FilterCategory.director, 'Director')),
+              ListTile(title: const Text('Actor'), trailing: const Icon(Icons.chevron_right), onTap: () => _loadPersons(_FilterCategory.actor, 'Actor')),
+              ListTile(title: const Text('Writer'), trailing: const Icon(Icons.chevron_right), onTap: () => _loadPersons(_FilterCategory.writer, 'Writer')),
+              ListTile(title: const Text('Producer'), trailing: const Icon(Icons.chevron_right), onTap: () => _loadPersons(_FilterCategory.producer, 'Producer')),
+            ],
+          ),
+        ),
+      _FilterCategory.genre => _valueList(genres, (v) => LibraryFilter(genre: v)),
+      _FilterCategory.year => _valueList(years, (v) => LibraryFilter(year: int.tryParse(v))),
+      _FilterCategory.contentRating => _valueList(officialRatings, (v) => LibraryFilter(officialRating: v)),
+      _FilterCategory.studio => _studioList(),
+      _FilterCategory.director => _personList(_persons ?? const [], (id, name) => LibraryFilter(personId: id, personName: name)),
+      _FilterCategory.actor => _personList(_persons ?? const [], (id, name) => LibraryFilter(personId: id, personName: name)),
+      _FilterCategory.writer => _personList(_persons ?? const [], (id, name) => LibraryFilter(personId: id, personName: name)),
+      _FilterCategory.producer => _personList(_persons ?? const [], (id, name) => LibraryFilter(personId: id, personName: name)),
+    };
+
+    final title = switch (_view) {
+      _FilterCategory.none => 'Filter by',
+      _FilterCategory.genre => 'Genre',
+      _FilterCategory.year => 'Year',
+      _FilterCategory.contentRating => 'Content Rating',
+      _FilterCategory.studio => 'Studio',
+      _FilterCategory.director => 'Director',
+      _FilterCategory.actor => 'Actor',
+      _FilterCategory.writer => 'Writer',
+      _FilterCategory.producer => 'Producer',
+    };
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * .75,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(width: 38, height: 4, margin: const EdgeInsets.only(top: 10), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4))),
+            _header(title, onBack: _view == _FilterCategory.none ? null : () => setState(() => _view = _FilterCategory.none)),
+            body,
+          ],
+        ),
+      ),
+    );
+  }
 }
