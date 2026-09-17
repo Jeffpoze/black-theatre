@@ -414,6 +414,29 @@ class _DetailScreenState extends State<DetailScreen> {
     if (selected != null && selected != _selectedSeasonId) _selectSeason(selected);
   }
 
+  Future<void> _openEpisodeListSheet() async {
+    final seriesName = _asString(_item?['Name']) ?? '';
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF0A0B0D),
+      builder: (context) => _EpisodeListSheet(
+        serverUrl: widget.serverUrl,
+        userId: widget.userId,
+        token: widget.token,
+        seriesId: widget.itemId,
+        seriesName: seriesName,
+        seasons: _seasons,
+        initialSeasonId: _selectedSeasonId,
+        initialEpisodes: _seasonEpisodes,
+        onSelectEpisode: (episode) {
+          Navigator.of(context).pop();
+          _playEpisode(episode);
+        },
+      ),
+    );
+  }
+
   void _showUnavailable(String feature) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('$feature is coming soon.')),
@@ -654,7 +677,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                   if (isSeries && _nextUp != null) ...[
                                     const SizedBox(height: 10),
                                     GestureDetector(
-                                      onTap: _seasons.length > 1 ? _openSeasonPicker : null,
+                                      onTap: _seasons.isNotEmpty ? _openEpisodeListSheet : null,
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -669,7 +692,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                               ),
                                             ),
                                           ),
-                                          if (_seasons.length > 1) const Icon(Icons.expand_more, size: 20),
+                                          if (_seasons.isNotEmpty) const Icon(Icons.expand_more, size: 20),
                                         ],
                                       ),
                                     ),
@@ -1220,6 +1243,177 @@ class _EpisodeCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _EpisodeListSheet extends StatefulWidget {
+  const _EpisodeListSheet({
+    required this.serverUrl,
+    required this.userId,
+    required this.token,
+    required this.seriesId,
+    required this.seriesName,
+    required this.seasons,
+    required this.initialSeasonId,
+    required this.initialEpisodes,
+    required this.onSelectEpisode,
+  });
+  final String serverUrl;
+  final String userId;
+  final String token;
+  final String seriesId;
+  final String seriesName;
+  final List<dynamic> seasons;
+  final String? initialSeasonId;
+  final List<dynamic> initialEpisodes;
+  final void Function(Map<String, dynamic> episode) onSelectEpisode;
+
+  @override
+  State<_EpisodeListSheet> createState() => _EpisodeListSheetState();
+}
+
+class _EpisodeListSheetState extends State<_EpisodeListSheet> {
+  final _api = JellyfinApiService();
+  late String? _seasonId = widget.initialSeasonId;
+  late List<dynamic> _episodes = widget.initialEpisodes;
+  bool _loading = false;
+
+  List<Map<String, dynamic>> get _seasonList => widget.seasons.whereType<Map<String, dynamic>>().toList();
+
+  String? get _nextSeasonId {
+    final seasons = _seasonList;
+    final index = seasons.indexWhere((s) => s['Id'] == _seasonId);
+    return index >= 0 && index + 1 < seasons.length ? _asString(seasons[index + 1]['Id']) : null;
+  }
+
+  String? get _nextSeasonName {
+    final seasons = _seasonList;
+    final index = seasons.indexWhere((s) => s['Id'] == _seasonId);
+    return index >= 0 && index + 1 < seasons.length ? _asString(seasons[index + 1]['Name']) : null;
+  }
+
+  Future<void> _goToSeason(String seasonId) async {
+    setState(() => _loading = true);
+    try {
+      final episodes = await _api.getEpisodes(widget.serverUrl, widget.userId, widget.token, widget.seriesId, seasonId: seasonId);
+      if (mounted) setState(() { _seasonId = seasonId; _episodes = episodes; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        height: MediaQuery.of(context).size.height * .85,
+        child: SafeArea(
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(width: 38, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4))),
+              const SizedBox(height: 16),
+              Text('${_episodes.length} Episodes', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const Divider(height: 24, color: Color(0xFF252525)),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        itemCount: _episodes.length,
+                        separatorBuilder: (_, _) => const Divider(height: 24, color: Color(0xFF1B1D22)),
+                        itemBuilder: (context, index) {
+                          final episode = _episodes[index];
+                          if (episode is! Map<String, dynamic>) return const SizedBox.shrink();
+                          return _EpisodeListRow(episode: episode, serverUrl: widget.serverUrl, token: widget.token, onTap: () => widget.onSelectEpisode(episode));
+                        },
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                child: Row(children: [
+                  if (_nextSeasonId != null) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => _goToSeason(_nextSeasonId!),
+                        child: Text('Go to ${_nextSeasonName ?? 'Next Season'}', overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(child: OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Go to Show'))),
+                ]),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class _EpisodeListRow extends StatelessWidget {
+  const _EpisodeListRow({required this.episode, required this.serverUrl, required this.token, required this.onTap});
+  final Map<String, dynamic> episode;
+  final String serverUrl;
+  final String token;
+  final VoidCallback onTap;
+
+  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  String? _formatDate(String? iso) {
+    final date = iso == null ? null : DateTime.tryParse(iso);
+    if (date == null) return null;
+    return '${_months[date.month - 1]} ${date.day}, ${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final itemId = _asString(episode['Id']);
+    final name = _asString(episode['Name']) ?? 'Episode';
+    final indexNumber = episode['IndexNumber'];
+    final date = _formatDate(_asString(episode['PremiereDate']));
+    final overview = _asString(episode['Overview']);
+    final tag = _asString(episode['PrimaryImageTag']) ?? (episode['ImageTags'] is Map ? _asString((episode['ImageTags'] as Map)['Primary']) : null);
+    final imageUrl = itemId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, itemId, imageTag: tag, maxWidth: 400) : null;
+
+    return InkWell(
+      onTap: onTap,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Stack(children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 110,
+                height: 70,
+                child: imageUrl == null
+                    ? const ColoredBox(color: Color(0xFF17191D), child: Icon(Icons.movie_outlined, color: Colors.white24))
+                    : CachedNetworkImage(imageUrl: imageUrl, httpHeaders: JellyfinApiService.authHeaders(token), fit: BoxFit.cover, memCacheWidth: 400, errorWidget: (_, _, _) => const ColoredBox(color: Color(0xFF17191D))),
+              ),
+            ),
+            if (indexNumber != null)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(3)),
+                  child: Text('E$indexNumber', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                ),
+              ),
+          ]),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                if (date != null) Padding(padding: const EdgeInsets.only(top: 2), child: Text(date, style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFA5A7AC)))),
+                if (overview != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(overview, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xFFA5A7AC)))),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
