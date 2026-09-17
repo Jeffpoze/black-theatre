@@ -4,7 +4,6 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'calendar_screen.dart';
@@ -16,7 +15,6 @@ import 'settings_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
   final settings = SettingsController();
   await settings.load();
   final savedSession = await _loadSavedSession();
