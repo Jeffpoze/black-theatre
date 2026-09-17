@@ -898,6 +898,142 @@ class JellyfinApiService {
       throw Exception('Unable to update watched status.');
   }
 
+  Future<bool> checkIsAdministrator(
+    String serverUrl,
+    String userId,
+    String token,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final response = await _client.get(
+      Uri.parse('$cleanUrl/Users/$userId'),
+      headers: authHeaders(token),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) return false;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final policy = data['Policy'] as Map<String, dynamic>?;
+    return policy?['IsAdministrator'] == true;
+  }
+
+  // Non-destructive default refresh: fills in missing metadata/images without
+  // overwriting what's already there. Matches Jellyfin-web's plain "Refresh
+  // metadata" button (not the "Replace all metadata" checkbox variant).
+  Future<void> refreshMetadata(
+    String serverUrl,
+    String token,
+    String itemId,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Items/$itemId/Refresh').replace(
+      queryParameters: {
+        'MetadataRefreshMode': 'Default',
+        'ImageRefreshMode': 'Default',
+        'ReplaceAllMetadata': 'false',
+        'ReplaceAllImages': 'false',
+      },
+    );
+    final response = await _client.post(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Unable to refresh metadata.');
+    }
+  }
+
+  Future<void> deleteItem(String serverUrl, String token, String itemId) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final response = await _client.delete(
+      Uri.parse('$cleanUrl/Items/$itemId'),
+      headers: authHeaders(token),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Unable to delete item.');
+    }
+  }
+
+  // A broad field set so the editor round-trips the item's existing metadata
+  // instead of silently nulling out fields the detail screen never fetches —
+  // Jellyfin's update endpoint replaces the whole editable DTO, not a patch.
+  Future<Map<String, dynamic>> getItemForEdit(
+    String serverUrl,
+    String userId,
+    String token,
+    String itemId,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items/$itemId').replace(
+      queryParameters: {
+        'Fields': 'Overview,Genres,Studios,People,Tags,ProviderIds,Taglines,'
+            'OriginalTitle,SortName,ForcedSortName,PremiereDate,ProductionYear,'
+            'EndDate,Status,OfficialRating,CommunityRating,CriticRating,'
+            'RunTimeTicks,LockData,LockedFields,PreferredMetadataLanguage,'
+            'PreferredMetadataCountryCode,ExternalUrls,RemoteTrailers',
+      },
+    );
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Unable to load item for editing.');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<void> updateItemMetadata(
+    String serverUrl,
+    String token,
+    String itemId,
+    Map<String, dynamic> fullItem,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final response = await _client.post(
+      Uri.parse('$cleanUrl/Items/$itemId'),
+      headers: {...authHeaders(token), 'Content-Type': 'application/json'},
+      body: jsonEncode(fullItem),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Unable to update metadata.');
+    }
+  }
+
+  Future<Map<String, dynamic>?> getFileInfo(
+    String serverUrl,
+    String userId,
+    String token,
+    String itemId,
+  ) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items/$itemId')
+        .replace(queryParameters: {'Fields': 'MediaSources,Path'});
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) return null;
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final sources = data['MediaSources'] as List<dynamic>?;
+    if (sources == null || sources.isEmpty) return null;
+    return sources.first as Map<String, dynamic>;
+  }
+
+  Future<void> setArtworkFromUrl(
+    String serverUrl,
+    String token,
+    String itemId,
+    String imageUrl, {
+    String type = 'Primary',
+  }) async {
+    final imageResponse = await _client.get(Uri.parse(imageUrl));
+    if (imageResponse.statusCode < 200 || imageResponse.statusCode >= 300) {
+      throw Exception('Could not download that image.');
+    }
+    final contentType = imageResponse.headers['content-type'] ?? 'image/jpeg';
+    if (!contentType.startsWith('image/')) {
+      throw Exception('That URL is not an image.');
+    }
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final response = await _client.post(
+      Uri.parse('$cleanUrl/Items/$itemId/Images/$type'),
+      headers: {...authHeaders(token), 'Content-Type': contentType},
+      body: base64Encode(imageResponse.bodyBytes),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Unable to set artwork.');
+    }
+  }
+
   Future<List<dynamic>> getLibraryViews(
     String serverUrl,
     String userId,

@@ -41,6 +41,7 @@ class _DetailScreenState extends State<DetailScreen> {
   String? _error;
   bool _favoriteBusy = false;
   bool _watchedBusy = false;
+  bool _isAdmin = false;
 
   @override
   void initState() {
@@ -65,6 +66,12 @@ class _DetailScreenState extends State<DetailScreen> {
       }
     } catch (error) {
       if (mounted) setState(() { _isLoading = false; _error = 'Unable to load details.\n$error'; });
+    }
+    try {
+      final isAdmin = await _api.checkIsAdministrator(widget.serverUrl, widget.userId, widget.token);
+      if (mounted) setState(() => _isAdmin = isAdmin);
+    } catch (_) {
+      // Admin-only actions just stay hidden if this check fails.
     }
   }
 
@@ -272,6 +279,175 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
+  Future<void> _refreshMetadata() async {
+    try {
+      await _api.refreshMetadata(widget.serverUrl, widget.token, widget.itemId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing metadata…')));
+      await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not refresh metadata: $e')));
+    }
+  }
+
+  Future<void> _confirmDelete() async {
+    final name = _asString(_item?['Name']) ?? 'this item';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete from server?'),
+        content: Text('This permanently deletes "$name" from your Jellyfin library. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _api.deleteItem(widget.serverUrl, widget.token, widget.itemId);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: $e')));
+    }
+  }
+
+  Future<void> _showFileInfo() async {
+    Map<String, dynamic>? source;
+    try {
+      source = await _api.getFileInfo(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+    } catch (_) {}
+    if (!mounted) return;
+    final path = _asString(source?['Path']);
+    final container = _asString(source?['Container'])?.toUpperCase();
+    final sizeBytes = _asNum(source?['Size']);
+    final bitrate = _asNum(source?['Bitrate']);
+    final sizeLabel = sizeBytes == null ? null : '${(sizeBytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+    final bitrateLabel = bitrate == null ? null : '${(bitrate / 1000000).toStringAsFixed(1)} Mbps';
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('File Info'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (container != null) _InfoLine('Container', container),
+            if (sizeLabel != null) _InfoLine('Size', sizeLabel),
+            if (bitrateLabel != null) _InfoLine('Bitrate', bitrateLabel),
+            if (path != null) _InfoLine('Path', path),
+            if (container == null && sizeLabel == null && path == null) const Text('File info is unavailable for this item.'),
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Future<void> _showHistory() async {
+    final item = _item;
+    final userData = item?['UserData'] as Map<String, dynamic>?;
+    final dateCreated = _asString(item?['DateCreated']);
+    final lastPlayed = _asString(userData?['LastPlayedDate']);
+    final playCount = _asInt(userData?['PlayCount']);
+    String formatDate(String? iso) {
+      if (iso == null) return 'Unknown';
+      final parsed = DateTime.tryParse(iso);
+      if (parsed == null) return iso;
+      final local = parsed.toLocal();
+      return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('History'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _InfoLine('Added to library', formatDate(dateCreated)),
+            _InfoLine('Last played', lastPlayed == null ? 'Never' : formatDate(lastPlayed)),
+            _InfoLine('Play count', '${playCount ?? 0}'),
+          ],
+        ),
+        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close'))],
+      ),
+    );
+  }
+
+  Future<void> _openEditMetadata() async {
+    Map<String, dynamic> fullItem;
+    try {
+      fullItem = await _api.getItemForEdit(widget.serverUrl, widget.userId, widget.token, widget.itemId);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load metadata for editing: $e')));
+      return;
+    }
+    if (!mounted) return;
+    final nameController = TextEditingController(text: _asString(fullItem['Name']) ?? '');
+    final overviewController = TextEditingController(text: _asString(fullItem['Overview']) ?? '');
+    final tagsController = TextEditingController(text: (fullItem['Tags'] as List<dynamic>?)?.whereType<String>().join(', ') ?? '');
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Edit Metadata', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 16),
+              TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Name')),
+              const SizedBox(height: 12),
+              TextField(controller: overviewController, decoration: const InputDecoration(labelText: 'Overview'), maxLines: 4),
+              const SizedBox(height: 12),
+              TextField(controller: tagsController, decoration: const InputDecoration(labelText: 'Tags (comma separated)')),
+              const SizedBox(height: 20),
+              FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (saved != true) return;
+    fullItem['Name'] = nameController.text.trim();
+    fullItem['Overview'] = overviewController.text.trim();
+    fullItem['Tags'] = tagsController.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    try {
+      await _api.updateItemMetadata(widget.serverUrl, widget.token, widget.itemId, fullItem);
+      if (mounted) await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save metadata: $e')));
+    }
+  }
+
+  Future<void> _openSetArtwork() async {
+    final urlController = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Set Artwork from URL'),
+        content: TextField(controller: urlController, decoration: const InputDecoration(hintText: 'https://...'), autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(urlController.text.trim()), child: const Text('Set')),
+        ],
+      ),
+    );
+    if (url == null || url.isEmpty) return;
+    try {
+      await _api.setArtworkFromUrl(widget.serverUrl, widget.token, widget.itemId, url);
+      if (mounted) await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not set artwork: $e')));
+    }
+  }
+
   Future<void> _openMoreActions() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -292,9 +468,17 @@ class _DetailScreenState extends State<DetailScreen> {
               _MoreAction(icon: Icons.forum_outlined, label: 'Start a Discussion', onTap: () { Navigator.pop(context); _showUnavailable('Discussions'); }),
               if (_item?['Type'] == 'Episode') _MoreAction(icon: Icons.tv_outlined, label: 'Go to Show', onTap: () => Navigator.pop(context)),
               _MoreAction(icon: _isWatched ? Icons.remove_done_outlined : Icons.done_all, label: _isWatched ? 'Mark as Unwatched' : 'Mark as Watched', onTap: () { Navigator.pop(context); _setWatched(!_isWatched); }),
-              _MoreAction(icon: Icons.info_outline, label: 'File Info', onTap: () { Navigator.pop(context); _showUnavailable('File info'); }),
+              _MoreAction(icon: Icons.history, label: 'History', onTap: () { Navigator.pop(context); _showHistory(); }),
+              _MoreAction(icon: Icons.info_outline, label: 'File Info', onTap: () { Navigator.pop(context); _showFileInfo(); }),
               _MoreAction(icon: Icons.format_list_bulleted, label: 'More Ways to Watch', onTap: () { Navigator.pop(context); _showUnavailable('More ways to watch'); }),
               _MoreAction(icon: Icons.share_outlined, label: 'Share', onTap: () { Navigator.pop(context); _showUnavailable('Sharing'); }),
+              if (_isAdmin) ...[
+                const Divider(height: 30, color: Color(0xFF252525)),
+                _MoreAction(icon: Icons.edit_outlined, label: 'Edit Metadata', onTap: () { Navigator.pop(context); _openEditMetadata(); }),
+                _MoreAction(icon: Icons.image_outlined, label: 'Set Artwork from URL', onTap: () { Navigator.pop(context); _openSetArtwork(); }),
+                _MoreAction(icon: Icons.refresh, label: 'Refresh Metadata', onTap: () { Navigator.pop(context); _refreshMetadata(); }),
+                _MoreAction(icon: Icons.delete_outline, label: 'Delete', onTap: () { Navigator.pop(context); _confirmDelete(); }),
+              ],
             ],
           ),
         ),
@@ -636,6 +820,24 @@ class _ActionButton extends StatelessWidget {
           const SizedBox(height: 6),
           Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
         ]),
+      );
+}
+
+class _InfoLine extends StatelessWidget {
+  const _InfoLine(this.label, this.value);
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFFA5A7AC))),
+            Text(value, style: const TextStyle(fontSize: 14)),
+          ],
+        ),
       );
 }
 
