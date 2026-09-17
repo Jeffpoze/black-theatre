@@ -391,6 +391,8 @@ class _HomePageState extends State<HomePage> {
     setState(() => _isLoadingSelectedCategory = true);
     final sort = widget.settings.sortFor(id);
     final filter = _selectedCategoryFilter;
+    final view = _libraryViews.whereType<Map<String, dynamic>>().firstWhere((v) => v['Id'] == id, orElse: () => const {});
+    final collectionType = view['CollectionType'] as String?;
     final items = await _loadSection(
       'selected category $id',
       () => _api.getLibraryItems(
@@ -400,6 +402,7 @@ class _HomePageState extends State<HomePage> {
         id,
         sort: sort,
         filter: filter,
+        collectionType: collectionType,
       ),
     );
     if (!mounted || _selectedCategoryId != id) return;

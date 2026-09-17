@@ -696,9 +696,23 @@ class JellyfinApiService {
     String viewId, {
     required SortOption sort,
     LibraryFilter? filter,
+    String? collectionType,
   }) async {
     final cleanUrl = _normalizeUrl(serverUrl);
-    final itemFilters = ['IsNotFolder', if (filter?.unwatchedOnly == true) 'IsUnplayed'];
+    // A Series (and Season) is itself a folder, so recursive + IsNotFolder
+    // walked straight past it down to individual episodes — that's why a
+    // TV library showed repeated episode posters instead of one tile per
+    // show. The right browsable unit depends on what kind of library this
+    // is; only fall back to IsNotFolder (leaf items only, recursed all the
+    // way down) for a library type that doesn't have one obvious unit.
+    final includeTypes = switch (collectionType) {
+      'tvshows' => 'Series',
+      'movies' => 'Movie',
+      'music' => 'MusicAlbum',
+      'books' => 'Book',
+      _ => null,
+    };
+    final itemFilters = [if (includeTypes == null) 'IsNotFolder', if (filter?.unwatchedOnly == true) 'IsUnplayed'];
     final yearParam = filter?.year == null ? null : '${filter!.year}';
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
       queryParameters: {
@@ -706,7 +720,8 @@ class JellyfinApiService {
         'SortBy': sort.jellyfinSortBy,
         'SortOrder': sort.jellyfinSortOrder,
         'Recursive': 'true',
-        'Filters': itemFilters.join(','),
+        if (itemFilters.isNotEmpty) 'Filters': itemFilters.join(','),
+        'IncludeItemTypes': ?includeTypes,
         'Limit': '200',
         'Fields': 'PrimaryImageTag,ImageTags,SeriesPrimaryImageTag,AlbumPrimaryImageTag,AlbumId,PremiereDate,ProductionYear,EndDate,Status,CommunityRating',
         'Genres': ?filter?.genre,
