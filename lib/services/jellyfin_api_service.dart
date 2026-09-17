@@ -913,29 +913,6 @@ class JellyfinApiService {
       throw Exception('Unable to update watched status.');
   }
 
-  // Diagnostic only: fetches the manifest URL we're about to hand to the
-  // native player and summarizes what actually came back, so a "Cannot
-  // Open"-style native error (a generic AVFoundation bucket covering many
-  // unrelated root causes) can be told apart from an actual HTTP/auth
-  // failure on our side versus something AVPlayer itself chokes on despite
-  // a valid response.
-  Future<String> debugCheckManifest(String url, String token) async {
-    try {
-      // 15s wasn't enough to tell "slow" from "never" — a prior test timed
-      // out at 15s with no other information. Widened to find out whether
-      // Jellyfin eventually responds given more patience, or whether this
-      // genuinely never completes.
-      final response = await _client
-          .get(Uri.parse(url), headers: authHeaders(token))
-          .timeout(const Duration(seconds: 90));
-      final contentType = response.headers['content-type'] ?? 'unknown';
-      final bodyPreview = response.body.substring(0, response.body.length.clamp(0, 200));
-      return 'HTTP ${response.statusCode}, content-type=$contentType, body starts: $bodyPreview';
-    } catch (e) {
-      return 'Manifest fetch threw: $e';
-    }
-  }
-
   Future<bool> checkIsAdministrator(
     String serverUrl,
     String userId,

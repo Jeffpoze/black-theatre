@@ -79,7 +79,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _progressTimer;
   bool _hasOpenedStreamBefore = false;
   String? _currentStreamUrl;
-  String? _lastManifestCheck;
 
   bool _isAirplayAvailable = false;
   bool _isAirplayConnected = false;
@@ -213,7 +212,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           final (url, playSessionId) = result;
           _playSessionId = playSessionId;
           _currentStreamUrl = url;
-          _lastManifestCheck = await _api.debugCheckManifest(url, widget.token);
           await _controller.load(
             url: url,
             headers: JellyfinApiService.authHeaders(widget.token),
@@ -250,7 +248,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       playSessionId: _playSessionId,
     );
     _currentStreamUrl = url;
-    _lastManifestCheck = await _api.debugCheckManifest(url, widget.token);
     await _controller.load(
       url: url,
       headers: JellyfinApiService.authHeaders(widget.token),
@@ -258,6 +255,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       force: true,
     );
     if (_speed != 1.0) await _controller.setSpeed(_speed);
+    if (_subtitleStreamIndex != null) {
+      // The plugin deliberately starts every new item with subtitles off,
+      // regardless of what the HLS manifest itself flags as DEFAULT — its
+      // own docs say the app owns subtitle selection. Jellyfin embeds only
+      // the one subtitle stream we asked for via SubtitleStreamIndex, so
+      // there should be exactly one (non-off) track to select here.
+      final tracks = await _controller.getAvailableSubtitleTracks();
+      if (tracks.isNotEmpty) await _controller.setSubtitleTrack(tracks.first);
+    }
     _api.reportPlaybackStart(
       widget.serverUrl,
       widget.token,
@@ -272,14 +278,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _lastKnownPosition = _controller.currentPosition;
         final nativeMessage =
             (event.data?['message'] as String?) ?? 'Unable to play this video.';
-        // TEMPORARY diagnostic: shows what the manifest URL actually
-        // returned when fetched directly, to tell apart an HTTP/timeout
-        // failure on our side from AVFoundation's generic "Cannot Open"
-        // bucket rejecting a response that was actually fine.
-        final diagnostic = _lastManifestCheck;
-        if (mounted) {
-          setState(() => _error = diagnostic == null ? nativeMessage : '$nativeMessage\n\nManifest check: $diagnostic');
-        }
+        if (mounted) setState(() => _error = nativeMessage);
         break;
       case PlayerActivityState.completed:
         if (widget.onNext != null) widget.onNext!();
