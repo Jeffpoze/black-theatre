@@ -79,6 +79,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _progressTimer;
   bool _hasOpenedStreamBefore = false;
   String? _currentStreamUrl;
+  String? _lastManifestCheck;
 
   bool _isAirplayAvailable = false;
   bool _isAirplayConnected = false;
@@ -164,6 +165,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           final (url, playSessionId) = result;
           _playSessionId = playSessionId;
           _currentStreamUrl = url;
+          _lastManifestCheck = await _api.debugCheckManifest(url, widget.token);
           await _controller.load(url: url, headers: JellyfinApiService.authHeaders(widget.token), startAt: position, force: true);
           if (_speed != 1.0) await _controller.setSpeed(_speed);
           _api.reportPlaybackStart(widget.serverUrl, widget.token, widget.itemId, _playSessionId);
@@ -184,6 +186,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       playSessionId: _playSessionId,
     );
     _currentStreamUrl = url;
+    _lastManifestCheck = await _api.debugCheckManifest(url, widget.token);
     await _controller.load(url: url, headers: JellyfinApiService.authHeaders(widget.token), startAt: position, force: true);
     if (_speed != 1.0) await _controller.setSpeed(_speed);
     _api.reportPlaybackStart(widget.serverUrl, widget.token, widget.itemId, _playSessionId);
@@ -193,7 +196,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     switch (event.state) {
       case PlayerActivityState.error:
         _lastKnownPosition = _controller.currentPosition;
-        if (mounted) setState(() => _error = (event.data?['message'] as String?) ?? 'Unable to play this video.');
+        final nativeMessage = (event.data?['message'] as String?) ?? 'Unable to play this video.';
+        // TEMPORARY diagnostic: shows what the manifest URL actually
+        // returned when fetched directly, to tell apart an HTTP/auth
+        // failure on our side from AVFoundation's generic "Cannot Open"
+        // bucket rejecting a response that was actually fine.
+        final diagnostic = _lastManifestCheck;
+        if (mounted) setState(() => _error = diagnostic == null ? nativeMessage : '$nativeMessage\n\nManifest check: $diagnostic');
         break;
       case PlayerActivityState.completed:
         if (widget.onNext != null) widget.onNext!();
