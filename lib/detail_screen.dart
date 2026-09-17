@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 
+import 'manage_screen.dart';
 import 'player_screen.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
@@ -279,36 +280,17 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  Future<void> _refreshMetadata() async {
-    try {
-      await _api.refreshMetadata(widget.serverUrl, widget.token, widget.itemId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing metadata…')));
-      await _load();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not refresh metadata: $e')));
-    }
-  }
-
-  Future<void> _confirmDelete() async {
-    final name = _asString(_item?['Name']) ?? 'this item';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete from server?'),
-        content: Text('This permanently deletes "$name" from your Jellyfin library. This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await _api.deleteItem(widget.serverUrl, widget.token, widget.itemId);
-      if (mounted) Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete: $e')));
+  Future<void> _openManage() async {
+    final item = _item;
+    final name = _asString(item?['Name']) ?? 'Item';
+    final deleted = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => ManageScreen(serverUrl: widget.serverUrl, userId: widget.userId, token: widget.token, itemId: widget.itemId, itemName: name),
+    ));
+    if (!mounted) return;
+    if (deleted == true) {
+      Navigator.of(context).pop();
+    } else {
+      _load();
     }
   }
 
@@ -376,78 +358,6 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  Future<void> _openEditMetadata() async {
-    Map<String, dynamic> fullItem;
-    try {
-      fullItem = await _api.getItemForEdit(widget.serverUrl, widget.userId, widget.token, widget.itemId);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load metadata for editing: $e')));
-      return;
-    }
-    if (!mounted) return;
-    final nameController = TextEditingController(text: _asString(fullItem['Name']) ?? '');
-    final overviewController = TextEditingController(text: _asString(fullItem['Overview']) ?? '');
-    final tagsController = TextEditingController(text: (fullItem['Tags'] as List<dynamic>?)?.whereType<String>().join(', ') ?? '');
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.black,
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom, left: 20, right: 20, top: 20),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Edit Metadata', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 16),
-              TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Name')),
-              const SizedBox(height: 12),
-              TextField(controller: overviewController, decoration: const InputDecoration(labelText: 'Overview'), maxLines: 4),
-              const SizedBox(height: 12),
-              TextField(controller: tagsController, decoration: const InputDecoration(labelText: 'Tags (comma separated)')),
-              const SizedBox(height: 20),
-              FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (saved != true) return;
-    fullItem['Name'] = nameController.text.trim();
-    fullItem['Overview'] = overviewController.text.trim();
-    fullItem['Tags'] = tagsController.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
-    try {
-      await _api.updateItemMetadata(widget.serverUrl, widget.token, widget.itemId, fullItem);
-      if (mounted) await _load();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save metadata: $e')));
-    }
-  }
-
-  Future<void> _openSetArtwork() async {
-    final urlController = TextEditingController();
-    final url = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Set Artwork from URL'),
-        content: TextField(controller: urlController, decoration: const InputDecoration(hintText: 'https://...'), autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(urlController.text.trim()), child: const Text('Set')),
-        ],
-      ),
-    );
-    if (url == null || url.isEmpty) return;
-    try {
-      await _api.setArtworkFromUrl(widget.serverUrl, widget.token, widget.itemId, url);
-      if (mounted) await _load();
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not set artwork: $e')));
-    }
-  }
-
   Future<void> _openMoreActions() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -474,10 +384,7 @@ class _DetailScreenState extends State<DetailScreen> {
               _MoreAction(icon: Icons.share_outlined, label: 'Share', onTap: () { Navigator.pop(context); _showUnavailable('Sharing'); }),
               if (_isAdmin) ...[
                 const Divider(height: 30, color: Color(0xFF252525)),
-                _MoreAction(icon: Icons.edit_outlined, label: 'Edit Metadata', onTap: () { Navigator.pop(context); _openEditMetadata(); }),
-                _MoreAction(icon: Icons.image_outlined, label: 'Set Artwork from URL', onTap: () { Navigator.pop(context); _openSetArtwork(); }),
-                _MoreAction(icon: Icons.refresh, label: 'Refresh Metadata', onTap: () { Navigator.pop(context); _refreshMetadata(); }),
-                _MoreAction(icon: Icons.delete_outline, label: 'Delete', onTap: () { Navigator.pop(context); _confirmDelete(); }),
+                _MoreAction(icon: Icons.build_outlined, label: 'Manage', onTap: () { Navigator.pop(context); _openManage(); }),
               ],
             ],
           ),

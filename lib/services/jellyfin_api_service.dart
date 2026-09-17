@@ -1049,6 +1049,46 @@ class JellyfinApiService {
     }
   }
 
+  // Candidate images from Jellyfin's configured metadata providers (TMDB,
+  // Fanart.tv, etc.) — what jellyfin-web's own "Change Image" picker shows.
+  // Returns an empty list (not an error) if no providers are configured or
+  // none have a match, which is a real, common case on a personal server.
+  Future<List<Map<String, dynamic>>> getRemoteImages(
+    String serverUrl,
+    String token,
+    String itemId, {
+    required String type,
+  }) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Items/$itemId/RemoteImages').replace(queryParameters: {'type': type});
+    try {
+      final response = await _client.get(uri, headers: authHeaders(token));
+      if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return (data['Images'] as List<dynamic>?)?.whereType<Map<String, dynamic>>().toList() ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> downloadRemoteImage(
+    String serverUrl,
+    String token,
+    String itemId, {
+    required String type,
+    required String imageUrl,
+    String? providerName,
+  }) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Items/$itemId/RemoteImages/Download').replace(
+      queryParameters: {'Type': type, 'ImageUrl': imageUrl, 'ProviderName': ?providerName},
+    );
+    final response = await _client.post(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Unable to apply that image.');
+    }
+  }
+
   Future<List<dynamic>> getLibraryViews(
     String serverUrl,
     String userId,
