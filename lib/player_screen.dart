@@ -91,6 +91,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   nvp_cast.CastDevice? _castDevice;
   StreamSubscription<nvp_cast.CastSessionStatus>? _castStatusSub;
 
+  bool _isPlaying = true;
+  StreamSubscription<PlayerActivityState>? _playerStateSub;
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +116,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller.addActivityListener(_handleActivityEvent);
     _controller.addAirPlayAvailabilityListener(_handleAirPlayAvailability);
     _controller.addAirPlayConnectionListener(_handleAirPlayConnection);
+    // The play/pause icon used to read straight off controller.playerStateStream,
+    // but that stream doesn't reliably fire right after a manual play()/pause()
+    // call — the icon would stay stuck on the pre-tap state. Track it locally
+    // instead: flip it optimistically on tap, and let this subscription correct
+    // it for changes we didn't initiate (buffering, completion, etc).
+    _playerStateSub = _controller.playerStateStream.listen((state) {
+      if (mounted) setState(() => _isPlaying = state.isPlaying);
+    });
     if (!widget.isAudioOnly && widget.localFilePath == null) {
       // Jellyfin's transcode has its own idle "kill timer" that tears down
       // the ffmpeg process if it stops hearing from the client — server logs
@@ -322,6 +333,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       .where((s) => s['Type'] == 'Subtitle')
       .toList();
 
+  List<Map<String, dynamic>> get _audioStreamsJellyfin => _jellyfinStreams
+      .whereType<Map<String, dynamic>>()
+      .where((s) => s['Type'] == 'Audio')
+      .toList();
+
   static const _languageNames = {
     'eng': 'English',
     'en': 'English',
@@ -366,7 +382,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return _languageNames[code.toLowerCase()] ?? code.toUpperCase();
   }
 
-  String _audioTrackLabel(NativeVideoPlayerAudioTrack track) {
+  // AVFoundation/ExoPlayer's own introspected audio-track metadata is often
+  // missing or generic (e.g. "Unknown") for tracks remuxed without proper
+  // language tags — Jellyfin's own MediaStreams data (ffprobe-derived) is
+  // reliable, so prefer it, matched to the native track list by ordinal
+  // position (both reflect the same file's audio tracks in the same order).
+  String _audioTrackLabel(NativeVideoPlayerAudioTrack track, int ordinalIndex) {
+    final jellyfinStreams = _audioStreamsJellyfin;
+    if (ordinalIndex >= 0 && ordinalIndex < jellyfinStreams.length) {
+      final stream = jellyfinStreams[ordinalIndex];
+      final language = _languageName(stream['Language'] as String?);
+      final codec = (stream['Codec'] as String?)?.toUpperCase();
+      final channelLayout = stream['ChannelLayout'] as String?;
+      if (language != null) {
+        final details = [
+          if (codec != null && codec.isNotEmpty) codec,
+          if (channelLayout != null && channelLayout.isNotEmpty) channelLayout,
+        ].join(' ');
+        return details.isEmpty ? language : '$language ($details)';
+      }
+    }
     final languageName = _languageName(track.language);
     if (languageName != null) return languageName;
     return track.displayName.isNotEmpty ? track.displayName : 'Audio';
@@ -385,7 +420,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _togglePlayPause() async {
-    if (_controller.activityState.isPlaying) {
+    final wasPlaying = _isPlaying;
+    setState(() => _isPlaying = !wasPlaying);
+    if (wasPlaying) {
       await _controller.pause();
     } else {
       await _controller.play();
@@ -425,14 +462,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       builder: (sheetContext) => _PlayerSettingsSheet(
         quality: _quality,
         subtitleLabel: _subtitleLabel(),
-        audioLabel: audioTracks.isEmpty
-            ? 'Default'
-            : _audioTrackLabel(
-                audioTracks.firstWhere(
-                  (t) => t.isSelected,
-                  orElse: () => audioTracks.first,
-                ),
-              ),
+        audioLabel: audioTracks.isEmpty ? 'Default' : _audioTrackLabel(audioTracks[_selectedAudioIndex(audioTracks)], _selectedAudioIndex(audioTracks)),
         hasSubtitles: subtitleStreams.isNotEmpty,
         hasAudioChoices: audioTracks.length > 1,
         onQuality: () => _chooseQuality(sheetContext, position),
@@ -441,6 +471,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
         onAudio: () => _chooseAudio(sheetContext, audioTracks),
       ),
     );
+  }
+
+  int _selectedAudioIndex(List<NativeVideoPlayerAudioTrack> tracks) {
+    final index = tracks.indexWhere((t) => t.isSelected);
+    return index >= 0 ? index : 0;
   }
 
   String _subtitleLabel() {
@@ -510,7 +545,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       value: tracks.indexWhere((t) => t.isSelected),
       options: [
         for (var i = 0; i < tracks.length; i++)
-          _ChoiceOption(i, _audioTrackLabel(tracks[i])),
+          _ChoiceOption(i, _audioTrackLabel(tracks[i], i)),
       ],
     );
     if (selectedIndex == null || selectedIndex < 0 || !mounted) return;
@@ -525,6 +560,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }) => showModalBottomSheet<T>(
     context: context,
     backgroundColor: Colors.transparent,
+    isScrollControlled: true,
     builder: (context) =>
         _ChoiceSheet<T>(title: title, value: value, options: options),
   );
@@ -593,6 +629,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _playerStateSub?.cancel();
     _controller.removeActivityListener(_handleActivityEvent);
     _controller.removeAirPlayAvailabilityListener(_handleAirPlayAvailability);
     _controller.removeAirPlayConnectionListener(_handleAirPlayConnection);
@@ -696,7 +733,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ),
                       _CenterControls(
-                        controller: _controller,
+                        isPlaying: _isPlaying,
                         skipSeconds: widget.settings.skipSeconds,
                         onSeekBack: () => _seekBy(
                           Duration(seconds: -widget.settings.skipSeconds),
@@ -704,8 +741,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         onSeekForward: () => _seekBy(
                           Duration(seconds: widget.settings.skipSeconds),
                         ),
-                        onPrevious: () => _seekBy(const Duration(seconds: -10)),
-                        onNext: widget.onNext,
                         onPlayPause: _togglePlayPause,
                       ),
                       _BottomBar(
@@ -715,6 +750,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ? null
                             : _toggleSubtitles,
                         subtitlesOn: _subtitleStreamIndex != null,
+                        onNext: widget.onNext,
                       ),
                     ],
                   ),
@@ -859,47 +895,59 @@ class _ChoiceSheet<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SafeArea(
     top: false,
-    child: Container(
-      margin: const EdgeInsets.symmetric(horizontal: 66),
-      padding: const EdgeInsets.fromLTRB(34, 12, 34, 28),
-      decoration: const BoxDecoration(
-        color: Color(0xFF101114),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 42,
-            height: 5,
-            decoration: BoxDecoration(
-              color: const Color(0xFF29292C),
-              borderRadius: BorderRadius.circular(99),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 25,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 12),
-          for (final option in options)
-            ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-              title: Text(
-                option.label,
-                style: const TextStyle(color: Colors.white, fontSize: 18),
+    child: ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.8),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 66),
+        padding: const EdgeInsets.fromLTRB(34, 12, 34, 0),
+        decoration: const BoxDecoration(
+          color: Color(0xFF101114),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 42,
+              height: 5,
+              decoration: BoxDecoration(
+                color: const Color(0xFF29292C),
+                borderRadius: BorderRadius.circular(99),
               ),
-              trailing: option.value == value
-                  ? const Icon(Icons.check, color: Color(0xFFFFB800))
-                  : null,
-              onTap: () => Navigator.of(context).pop(option.value),
             ),
-        ],
+            const SizedBox(height: 24),
+            Text(
+              title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 25,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 28),
+                children: [
+                  for (final option in options)
+                    ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                      title: Text(
+                        option.label,
+                        style: const TextStyle(color: Colors.white, fontSize: 18),
+                      ),
+                      trailing: option.value == value
+                          ? const Icon(Icons.check, color: Color(0xFFFFB800))
+                          : null,
+                      onTap: () => Navigator.of(context).pop(option.value),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     ),
   );
@@ -1219,56 +1267,69 @@ class _TopBar extends StatelessWidget {
 
 class _CenterControls extends StatelessWidget {
   const _CenterControls({
-    required this.controller,
+    required this.isPlaying,
     required this.skipSeconds,
     required this.onSeekBack,
     required this.onSeekForward,
-    required this.onPrevious,
-    required this.onNext,
     required this.onPlayPause,
   });
-  final NativeVideoPlayerController controller;
+  final bool isPlaying;
   final int skipSeconds;
   final VoidCallback onSeekBack;
   final VoidCallback onSeekForward;
-  final VoidCallback onPrevious;
-  final VoidCallback? onNext;
   final VoidCallback onPlayPause;
 
   @override
   Widget build(BuildContext context) => Center(
-    child: StreamBuilder<PlayerActivityState>(
-      stream: controller.playerStateStream,
-      initialData: controller.activityState,
-      builder: (context, snapshot) {
-        final playing = (snapshot.data ?? PlayerActivityState.idle).isPlaying;
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton(
-              iconSize: 42,
-              onPressed: onPrevious,
-              icon: const Icon(Icons.skip_previous, color: Color(0xFFC9C8CD)),
-            ),
-            const SizedBox(width: 66),
-            IconButton(
-              iconSize: 68,
-              onPressed: onPlayPause,
-              icon: Icon(
-                playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(width: 66),
-            IconButton(
-              iconSize: 42,
-              onPressed: onNext ?? onSeekForward,
-              icon: const Icon(Icons.skip_next, color: Colors.white),
-            ),
-          ],
-        );
-      },
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          iconSize: 46,
+          onPressed: onSeekBack,
+          icon: _SeekIcon(forward: false, seconds: skipSeconds),
+        ),
+        const SizedBox(width: 66),
+        IconButton(
+          iconSize: 68,
+          onPressed: onPlayPause,
+          icon: Icon(
+            isPlaying ? Icons.pause : Icons.play_arrow,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(width: 66),
+        IconButton(
+          iconSize: 46,
+          onPressed: onSeekForward,
+          icon: _SeekIcon(forward: true, seconds: skipSeconds),
+        ),
+      ],
     ),
+  );
+}
+
+// Mirrors Material's built-in replay_10/forward_10 glyphs, but with the
+// actual configured skip interval overlaid instead of a hardcoded "10" —
+// the app lets the skip interval be changed in Settings (5/10/15/30/60s).
+class _SeekIcon extends StatelessWidget {
+  const _SeekIcon({required this.forward, required this.seconds});
+  final bool forward;
+  final int seconds;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    alignment: Alignment.center,
+    children: [
+      Icon(forward ? Icons.forward : Icons.replay, color: Colors.white, size: 46),
+      Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Text(
+          '$seconds',
+          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800),
+        ),
+      ),
+    ],
   );
 }
 
@@ -1278,11 +1339,13 @@ class _BottomBar extends StatelessWidget {
     required this.onSettings,
     required this.onToggleSubtitles,
     required this.subtitlesOn,
+    this.onNext,
   });
   final NativeVideoPlayerController controller;
   final VoidCallback onSettings;
   final VoidCallback? onToggleSubtitles;
   final bool subtitlesOn;
+  final VoidCallback? onNext;
 
   String _format(Duration d) {
     final h = d.inHours;
@@ -1306,6 +1369,17 @@ class _BottomBar extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                if (onNext != null) ...[
+                  IconButton(
+                    onPressed: onNext,
+                    icon: const Icon(
+                      Icons.skip_next,
+                      color: Color(0xFFD3D2D6),
+                      size: 31,
+                    ),
+                  ),
+                  const SizedBox(width: 18),
+                ],
                 if (onToggleSubtitles != null)
                   IconButton(
                     onPressed: onToggleSubtitles,
