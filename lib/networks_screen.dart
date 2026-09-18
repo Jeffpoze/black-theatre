@@ -217,7 +217,7 @@ class _NetworkTileState extends State<_NetworkTile> {
                 MaterialPageRoute(builder: (_) => NetworkItemsScreen(session: widget.session, settings: widget.settings, studioId: id, studioName: name)),
               ),
       child: Container(
-        decoration: BoxDecoration(color: brand?.background ?? const Color(0xFF1B1D22), borderRadius: BorderRadius.circular(10)),
+        decoration: BoxDecoration(color: const Color(0xFF1B1D22), borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.all(16),
         alignment: Alignment.center,
         child: hasLogoImage
