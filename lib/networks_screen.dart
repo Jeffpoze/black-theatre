@@ -11,7 +11,7 @@ import 'settings_controller.dart';
 // companies (A24, Bones, Legendary…) that aren't what "network browsing"
 // means here, so this filters down to recognizable streaming/broadcast
 // networks by name rather than showing every studio.
-const _knownNetworkPatterns = [
+const knownNetworkPatterns = [
   'netflix',
   'apple tv',
   'prime video',
@@ -39,9 +39,9 @@ const _knownNetworkPatterns = [
   'britbox',
 ];
 
-bool _looksLikeNetwork(String name) {
+bool looksLikeNetwork(String name) {
   final lower = name.toLowerCase();
-  return _knownNetworkPatterns.any((pattern) => lower.contains(pattern));
+  return knownNetworkPatterns.any((pattern) => lower.contains(pattern));
 }
 
 // Real logo artwork is trademarked and Jellyfin rarely has studio images
@@ -113,7 +113,7 @@ class _NetworksScreenState extends State<NetworksScreen> {
     final studios = await _api.getStudios(widget.session.serverUrl, widget.session.userId, widget.session.token);
     final networks = studios.whereType<Map<String, dynamic>>().where((s) {
       final name = s['Name'] as String?;
-      return name != null && _looksLikeNetwork(name);
+      return name != null && looksLikeNetwork(name);
     }).toList()
       ..sort((a, b) => ((a['Name'] as String?) ?? '').compareTo((b['Name'] as String?) ?? ''));
     if (mounted) setState(() => _networks = networks);

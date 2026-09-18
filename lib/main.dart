@@ -265,6 +265,8 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> _libraryViews = const [];
   Map<String, List<dynamic>> _categoryItems = {};
   List<dynamic> _featuredItems = const [];
+  String? _featuredNetworkName;
+  Timer? _featuredRotationTimer;
   String? _selectedCategoryId;
   bool _isLoadingContinueWatching = true;
   bool _isLoadingFeaturedItems = true;
@@ -277,6 +279,15 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadHomeSections();
+    // Re-pick the banner's featured network every 30 minutes so the
+    // homepage doesn't show the same "Top 10" while the app stays open.
+    _featuredRotationTimer = Timer.periodic(const Duration(minutes: 30), (_) => _loadFeaturedItems());
+  }
+
+  @override
+  void dispose() {
+    _featuredRotationTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadHomeSections() async {
@@ -323,19 +334,57 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _loadFeaturedItems() async {
-    final items = await _loadSection(
-      'featured items',
-      () => _api.getFeaturedItems(
-        widget.session.serverUrl,
-        widget.session.userId,
-        widget.session.token,
-      ),
-    );
+    final network = await _pickRotatingNetwork();
+    List<dynamic> items = const [];
+    if (network != null) {
+      items = await _loadSection(
+        'featured items for ${network['name']}',
+        () => _api.getTopItemsForStudio(
+          widget.session.serverUrl,
+          widget.session.userId,
+          widget.session.token,
+          network['id'] as String,
+        ),
+      );
+    }
+    // Fall back to plain latest-additions when there's no recognized
+    // network in the library yet, or that network has nothing with a
+    // backdrop image to show.
+    if (items.isEmpty) {
+      items = await _loadSection(
+        'featured items',
+        () => _api.getFeaturedItems(
+          widget.session.serverUrl,
+          widget.session.userId,
+          widget.session.token,
+        ),
+      );
+    }
     if (!mounted) return;
     setState(() {
       _featuredItems = items;
+      _featuredNetworkName = items.isEmpty ? null : network?['name'] as String?;
       _isLoadingFeaturedItems = false;
     });
+  }
+
+  // Deterministic on a 30-minute clock bucket, so every device rotates
+  // through the same network at the same time instead of re-randomizing
+  // on every reload within that window.
+  Future<Map<String, dynamic>?> _pickRotatingNetwork() async {
+    final studios = await _loadSection(
+      'network studios',
+      () => _api.getStudios(widget.session.serverUrl, widget.session.userId, widget.session.token),
+    );
+    final networks = studios.whereType<Map<String, dynamic>>().where((s) {
+      final name = s['Name'] as String?;
+      return name != null && looksLikeNetwork(name);
+    }).toList()
+      ..sort((a, b) => ((a['Name'] as String?) ?? '').compareTo((b['Name'] as String?) ?? ''));
+    if (networks.isEmpty) return null;
+    final bucket = DateTime.now().millisecondsSinceEpoch ~/ const Duration(minutes: 30).inMilliseconds;
+    final chosen = networks[bucket % networks.length];
+    return {'id': chosen['Id'] as String, 'name': chosen['Name'] as String};
   }
 
   Future<void> _loadCategoryRows(List<String> categoryIds) async {
@@ -536,6 +585,7 @@ class _HomePageState extends State<HomePage> {
                     ? const _HeroPlaceholder()
                     : _HeroCarousel(
                         items: _featuredItems,
+                        networkName: _featuredNetworkName,
                         serverUrl: widget.session.serverUrl,
                         userId: widget.session.userId,
                         token: widget.session.token,
@@ -849,12 +899,14 @@ class _HeroPlaceholder extends StatelessWidget {
 class _HeroCarousel extends StatefulWidget {
   const _HeroCarousel({
     required this.items,
+    this.networkName,
     required this.serverUrl,
     required this.userId,
     required this.token,
     required this.settings,
   });
   final List<dynamic> items;
+  final String? networkName;
   final String serverUrl;
   final String userId;
   final String token;
@@ -906,6 +958,7 @@ class _HeroCarouselState extends State<_HeroCarousel> {
             onPageChanged: (index) => setState(() => _page = index),
             itemBuilder: (context, index) => _HeroCard(
               item: items[index],
+              networkName: widget.networkName,
               serverUrl: widget.serverUrl,
               userId: widget.userId,
               token: widget.token,
@@ -942,12 +995,14 @@ class _HeroCarouselState extends State<_HeroCarousel> {
 class _HeroCard extends StatelessWidget {
   const _HeroCard({
     required this.item,
+    this.networkName,
     required this.serverUrl,
     required this.userId,
     required this.token,
     required this.settings,
   });
   final Map<String, dynamic> item;
+  final String? networkName;
   final String serverUrl;
   final String userId;
   final String token;
@@ -1018,6 +1073,18 @@ class _HeroCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (networkName != null) ...[
+                    Text(
+                      'TOP 10 ON ${networkName!.toUpperCase()}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.2,
+                        color: Color(0xFFCACBCF),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                   Text(
                     name,
                     maxLines: 1,

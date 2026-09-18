@@ -520,6 +520,40 @@ class JellyfinApiService {
         .toList();
   }
 
+  // Powers the homepage banner's network rotation — a "Top 10 on Netflix"
+  // style list, rather than the same overall latest-additions every time.
+  Future<List<dynamic>> getTopItemsForStudio(
+    String serverUrl,
+    String userId,
+    String token,
+    String studioId, {
+    int limit = 10,
+  }) async {
+    final cleanUrl = _normalizeUrl(serverUrl);
+    final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
+      queryParameters: {
+        'StudioIds': studioId,
+        'SortBy': 'CommunityRating,DateCreated',
+        'SortOrder': 'Descending',
+        'IncludeItemTypes': 'Movie,Series',
+        'Recursive': 'true',
+        'Limit': '$limit',
+        'Fields': 'Overview,BackdropImageTags,PrimaryImageTag,ProductionYear',
+      },
+    );
+    final response = await _client.get(uri, headers: authHeaders(token));
+    if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = (data['Items'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>();
+    return items
+        .where(
+          (item) =>
+              (item['BackdropImageTags'] as List<dynamic>?)?.isNotEmpty == true,
+        )
+        .toList();
+  }
+
   Future<List<dynamic>> getContinueWatching(
     String serverUrl,
     String userId,
