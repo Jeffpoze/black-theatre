@@ -123,6 +123,7 @@ class SettingsController extends ChangeNotifier {
   static const _skipSecondsKey = 'settings.skipSeconds';
   static const _defaultQualityKey = 'settings.defaultQuality';
   static const _omdbApiKeyKey = 'settings.omdbApiKey';
+  static const _tmdbApiKeyKey = 'settings.tmdbApiKey';
 
   Color _accentColor = accentColorOptions.first.color;
   Color get accentColor => _accentColor;
@@ -141,6 +142,14 @@ class SettingsController extends ChangeNotifier {
   String _omdbApiKey = '';
   String get omdbApiKey => _omdbApiKey;
 
+  // Free key from themoviedb.org — used to fetch real network logos
+  // (Netflix, Apple TV+, etc.) at runtime for the Networks screen and home
+  // banner. Real logo artwork can't be redistributed in this public repo,
+  // but fetching it live from TMDB's own image CDN, the way it's meant to
+  // be used, is fine. Stored locally only.
+  String _tmdbApiKey = '';
+  String get tmdbApiKey => _tmdbApiKey;
+
   final Map<String, SortOption> _categorySort = {};
 
   SortOption sortFor(String categoryId) => _categorySort[categoryId] ?? SortOption.releaseNewest;
@@ -154,6 +163,7 @@ class SettingsController extends ChangeNotifier {
     final storedQuality = prefs.getString(_defaultQualityKey);
     if (storedQuality != null && defaultQualityOptions.contains(storedQuality)) _defaultQuality = storedQuality;
     _omdbApiKey = prefs.getString(_omdbApiKeyKey) ?? '';
+    _tmdbApiKey = prefs.getString(_tmdbApiKeyKey) ?? '';
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(_categorySortPrefix)) continue;
       final id = key.substring(_categorySortPrefix.length);
@@ -190,6 +200,13 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_omdbApiKeyKey, key);
+  }
+
+  Future<void> setTmdbApiKey(String key) async {
+    _tmdbApiKey = key;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_tmdbApiKeyKey, key);
   }
 
   Future<void> setSortFor(String categoryId, SortOption option) async {

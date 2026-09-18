@@ -868,11 +868,16 @@ class JellyfinApiService {
       todayUtc.month,
       todayUtc.day,
     ).toIso8601String();
+    // Fetch an extra day of buffer beyond the nominal 7-day window: provider
+    // PremiereDate values are compared in UTC, so an item airing late in the
+    // local day 7 can otherwise fall just past the UTC cutoff and get
+    // dropped for users west of UTC. The 7-local-day cutoff itself is
+    // enforced client-side when grouping (see CalendarScreen).
     final maxPremiereDate = DateTime.utc(
       todayUtc.year,
       todayUtc.month,
       todayUtc.day,
-    ).add(const Duration(days: 7)).toIso8601String();
+    ).add(const Duration(days: 8)).toIso8601String();
     final uri = Uri.parse('$cleanUrl/Users/$userId/Items').replace(
       queryParameters: {
         'Recursive': 'true',

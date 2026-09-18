@@ -18,7 +18,7 @@ class SettingsScreen extends StatelessWidget {
             _SettingsRow(title: 'Account', subtitle: session.username, onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AccountScreen(session: session, settings: settings)))),
             _SettingsRow(title: 'Appearance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AppearanceScreen(settings: settings)))),
             _SettingsRow(title: 'Playback', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlaybackScreen(settings: settings)))),
-            _SettingsRow(title: 'Ratings', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RatingsScreen(settings: settings)))),
+            _SettingsRow(title: 'Ratings & Logos', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RatingsScreen(settings: settings)))),
             _SettingsRow(title: 'About', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen()))),
           ],
         ),
@@ -225,17 +225,19 @@ class RatingsScreen extends StatefulWidget {
 }
 
 class _RatingsScreenState extends State<RatingsScreen> {
-  late final _controller = TextEditingController(text: widget.settings.omdbApiKey);
+  late final _omdbController = TextEditingController(text: widget.settings.omdbApiKey);
+  late final _tmdbController = TextEditingController(text: widget.settings.tmdbApiKey);
 
   @override
   void dispose() {
-    _controller.dispose();
+    _omdbController.dispose();
+    _tmdbController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('RATINGS', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        appBar: AppBar(title: const Text('RATINGS & LOGOS', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
         body: ListView(
           padding: const EdgeInsets.all(20),
           children: [
@@ -248,14 +250,36 @@ class _RatingsScreenState extends State<RatingsScreen> {
             ),
             const SizedBox(height: 16),
             TextField(
-              controller: _controller,
+              controller: _omdbController,
               decoration: const InputDecoration(labelText: 'OMDB API Key', border: OutlineInputBorder()),
               onSubmitted: (value) => widget.settings.setOmdbApiKey(value.trim()),
             ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: () {
-                widget.settings.setOmdbApiKey(_controller.text.trim());
+                widget.settings.setOmdbApiKey(_omdbController.text.trim());
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved')));
+              },
+              child: const Text('Save'),
+            ),
+            const SizedBox(height: 32),
+            const Text('Network Logos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            const Text(
+              'The Networks screen and home banner show a real Netflix/Apple TV/etc. logo when one is available, fetched live from '
+              'themoviedb.org. Get a free API key at themoviedb.org/settings/api and paste it here.',
+              style: TextStyle(color: Color(0xFFA5A7AC)),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _tmdbController,
+              decoration: const InputDecoration(labelText: 'TMDB API Key', border: OutlineInputBorder()),
+              onSubmitted: (value) => widget.settings.setTmdbApiKey(value.trim()),
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: () {
+                widget.settings.setTmdbApiKey(_tmdbController.text.trim());
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved')));
               },
               child: const Text('Save'),

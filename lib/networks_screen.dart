@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'main.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
+import 'tmdb_service.dart';
 
 // Jellyfin has no distinct "Network" concept — the distributing network
 // (Netflix, Apple TV+, …) and a production studio both just land in the
@@ -90,6 +91,14 @@ _NetworkBrand? _brandFor(String name) {
   return null;
 }
 
+String? _tmdbKeyFor(String name) {
+  final lower = name.toLowerCase();
+  for (final key in tmdbNetworkIds.keys) {
+    if (lower.contains(key)) return key;
+  }
+  return null;
+}
+
 class NetworksScreen extends StatefulWidget {
   const NetworksScreen({super.key, required this.session, required this.settings});
   final JellyfinSession session;
@@ -143,38 +152,70 @@ class _NetworksScreenState extends State<NetworksScreen> {
   );
 }
 
-class _NetworkTile extends StatelessWidget {
+class _NetworkTile extends StatefulWidget {
   const _NetworkTile({required this.network, required this.session, required this.settings});
   final Map<String, dynamic> network;
   final JellyfinSession session;
   final SettingsController settings;
 
   @override
+  State<_NetworkTile> createState() => _NetworkTileState();
+}
+
+class _NetworkTileState extends State<_NetworkTile> {
+  String? _tmdbLogoUrl;
+
+  String? get _jellyfinImageUrl {
+    final id = widget.network['Id'] as String?;
+    final tag = widget.network['ImageTags'] is Map ? (widget.network['ImageTags'] as Map)['Primary'] as String? : null;
+    return id != null && tag != null ? JellyfinApiService.getImageUrl(widget.session.serverUrl, id, imageTag: tag, maxWidth: 400) : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Jellyfin's own studio image always wins when present — only fall
+    // back to a live TMDB logo lookup when there isn't one.
+    if (_jellyfinImageUrl == null && widget.settings.tmdbApiKey.isNotEmpty) {
+      final name = (widget.network['Name'] as String?) ?? '';
+      final key = _tmdbKeyFor(name);
+      if (key != null) {
+        TmdbService.logoUrlForNetworkKey(widget.settings.tmdbApiKey, key).then((url) {
+          if (mounted && url != null) setState(() => _tmdbLogoUrl = url);
+        });
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final id = network['Id'] as String?;
-    final name = (network['Name'] as String?) ?? 'Network';
-    final tag = network['ImageTags'] is Map ? (network['ImageTags'] as Map)['Primary'] as String? : null;
-    final imageUrl = id != null && tag != null ? JellyfinApiService.getImageUrl(session.serverUrl, id, imageTag: tag, maxWidth: 400) : null;
+    final id = widget.network['Id'] as String?;
+    final name = (widget.network['Name'] as String?) ?? 'Network';
+    final imageUrl = _jellyfinImageUrl;
     final brand = _brandFor(name);
+
+    Widget imageFor(String url, {bool useAuthHeaders = false}) => CachedNetworkImage(
+          imageUrl: url,
+          httpHeaders: useAuthHeaders ? JellyfinApiService.authHeaders(widget.session.token) : null,
+          fit: BoxFit.contain,
+          errorWidget: (_, _, _) => Text(name, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white)),
+        );
 
     return GestureDetector(
       onTap: id == null
           ? null
           : () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => NetworkItemsScreen(session: session, settings: settings, studioId: id, studioName: name)),
+                MaterialPageRoute(builder: (_) => NetworkItemsScreen(session: widget.session, settings: widget.settings, studioId: id, studioName: name)),
               ),
       child: Container(
         decoration: BoxDecoration(color: brand?.background ?? const Color(0xFF1B1D22), borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.all(16),
         alignment: Alignment.center,
-        child: imageUrl == null
-            ? Text(name, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white, letterSpacing: .5))
-            : CachedNetworkImage(
-                imageUrl: imageUrl,
-                httpHeaders: JellyfinApiService.authHeaders(session.token),
-                fit: BoxFit.contain,
-                errorWidget: (_, _, _) => Text(name, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white)),
-              ),
+        child: imageUrl != null
+            ? imageFor(imageUrl, useAuthHeaders: true)
+            : _tmdbLogoUrl != null
+                ? imageFor(_tmdbLogoUrl!)
+                : Text(name, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white, letterSpacing: .5)),
       ),
     );
   }

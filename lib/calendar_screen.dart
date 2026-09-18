@@ -70,11 +70,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   List<_DateGroup> _groupByDate(List<dynamic> items) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final cutoff = today.add(const Duration(days: 7));
     final byDate = <String, List<dynamic>>{};
     for (final item in items) {
       if (item is! Map<String, dynamic>) continue;
-      final date = DateTime.tryParse(item['PremiereDate'] as String? ?? '');
-      final key = date == null ? 'Unknown' : '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      final utcDate = DateTime.tryParse(item['PremiereDate'] as String? ?? '');
+      if (utcDate == null) continue;
+      final localDate = utcDate.toLocal();
+      final localDay = DateTime(localDate.year, localDate.month, localDate.day);
+      // The API is asked for a day of buffer beyond the nominal window (see
+      // getUpcomingItems) so nothing near the UTC boundary gets missed —
+      // enforce the true "next 7 days" cutoff here, in the viewer's own
+      // local calendar.
+      if (localDay.isBefore(today) || !localDay.isBefore(cutoff)) continue;
+      final key = '${localDay.year}-${localDay.month.toString().padLeft(2, '0')}-${localDay.day.toString().padLeft(2, '0')}';
       byDate.putIfAbsent(key, () => []).add(item);
     }
     final keys = byDate.keys.toList()..sort();
@@ -117,6 +128,7 @@ class _UpcomingRow extends StatelessWidget {
 
     final (posterId, tag) = _posterImage(item);
     final imageUrl = posterId != null && tag != null ? JellyfinApiService.getImageUrl(serverUrl, posterId, imageTag: tag, maxWidth: 170) : null;
+    final time = _releaseTime(item);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -150,9 +162,29 @@ class _UpcomingRow extends StatelessWidget {
               ],
             ),
           ),
+          if (time != null) ...[
+            const SizedBox(width: 10),
+            Text(time, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFA5A7AC))),
+          ],
         ],
       ),
     );
+  }
+
+  // Plenty of metadata providers only ever populate a bare date (which
+  // arrives as UTC midnight) with no real air time — showing a "time" for
+  // those would just be showing an artifact of the UTC conversion, so this
+  // only surfaces a time when the source timestamp actually carries one.
+  String? _releaseTime(Map<String, dynamic> item) {
+    final utcDate = DateTime.tryParse(item['PremiereDate'] as String? ?? '');
+    if (utcDate == null) return null;
+    if (utcDate.hour == 0 && utcDate.minute == 0 && utcDate.second == 0) return null;
+    final local = utcDate.toLocal();
+    final hour24 = local.hour;
+    final hour = hour24 % 12 == 0 ? 12 : hour24 % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = hour24 < 12 ? 'AM' : 'PM';
+    return '$hour:$minute $period';
   }
 
   (String?, String?) _posterImage(Map<String, dynamic> item) {
