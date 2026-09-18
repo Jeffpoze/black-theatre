@@ -194,11 +194,11 @@ class _NetworkTileState extends State<_NetworkTile> {
     final imageUrl = _jellyfinImageUrl;
     final brand = _brandFor(name);
 
-    // Real logo artwork is often a plain black or white wordmark meant to
-    // sit on a neutral card — not our own guessed brand color, which can
-    // just as easily match the logo itself and make it disappear (e.g.
-    // AMC's black logo on AMC's own black brand tile). Only the text
-    // fallback uses the brand color, since that's designed for it.
+    // Real logo artwork is often a plain black or white wordmark that needs
+    // a guaranteed-light background to stay legible (e.g. AMC's black
+    // wordmark would vanish on AMC's own black brand tile) — so any actual
+    // logo image sits on a white badge, while the tile itself keeps the
+    // brand color behind it instead of going flat white everywhere.
     final hasLogoImage = imageUrl != null || _tmdbLogoUrl != null;
 
     Widget imageFor(String url, {bool useAuthHeaders = false}) => CachedNetworkImage(
@@ -208,6 +208,8 @@ class _NetworkTileState extends State<_NetworkTile> {
           errorWidget: (_, _, _) => Text(name, textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white)),
         );
 
+    final logoUrl = imageUrl ?? _tmdbLogoUrl;
+
     return GestureDetector(
       onTap: id == null
           ? null
@@ -215,14 +217,21 @@ class _NetworkTileState extends State<_NetworkTile> {
                 MaterialPageRoute(builder: (_) => NetworkItemsScreen(session: widget.session, settings: widget.settings, studioId: id, studioName: name)),
               ),
       child: Container(
-        decoration: BoxDecoration(color: hasLogoImage ? Colors.white : (brand?.background ?? const Color(0xFF1B1D22)), borderRadius: BorderRadius.circular(10)),
+        decoration: BoxDecoration(color: brand?.background ?? const Color(0xFF1B1D22), borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.all(16),
         alignment: Alignment.center,
-        child: imageUrl != null
-            ? imageFor(imageUrl, useAuthHeaders: true)
-            : _tmdbLogoUrl != null
-                ? imageFor(_tmdbLogoUrl!)
-                : Text(name, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white, letterSpacing: .5)),
+        child: hasLogoImage
+            ? FractionallySizedBox(
+                widthFactor: 0.82,
+                heightFactor: 0.62,
+                child: Container(
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  alignment: Alignment.center,
+                  child: imageFor(logoUrl!, useAuthHeaders: imageUrl != null),
+                ),
+              )
+            : Text(name, textAlign: TextAlign.center, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: brand?.foreground ?? Colors.white, letterSpacing: .5)),
       ),
     );
   }
