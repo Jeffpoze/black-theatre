@@ -194,6 +194,13 @@ class _NetworkTileState extends State<_NetworkTile> {
     final imageUrl = _jellyfinImageUrl;
     final brand = _brandFor(name);
 
+    // Real logo artwork is often a plain black or white wordmark meant to
+    // sit on a neutral card — not our own guessed brand color, which can
+    // just as easily match the logo itself and make it disappear (e.g.
+    // AMC's black logo on AMC's own black brand tile). Only the text
+    // fallback uses the brand color, since that's designed for it.
+    final hasLogoImage = imageUrl != null || _tmdbLogoUrl != null;
+
     Widget imageFor(String url, {bool useAuthHeaders = false}) => CachedNetworkImage(
           imageUrl: url,
           httpHeaders: useAuthHeaders ? JellyfinApiService.authHeaders(widget.session.token) : null,
@@ -208,7 +215,7 @@ class _NetworkTileState extends State<_NetworkTile> {
                 MaterialPageRoute(builder: (_) => NetworkItemsScreen(session: widget.session, settings: widget.settings, studioId: id, studioName: name)),
               ),
       child: Container(
-        decoration: BoxDecoration(color: brand?.background ?? const Color(0xFF1B1D22), borderRadius: BorderRadius.circular(10)),
+        decoration: BoxDecoration(color: hasLogoImage ? Colors.white : (brand?.background ?? const Color(0xFF1B1D22)), borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.all(16),
         alignment: Alignment.center,
         child: imageUrl != null

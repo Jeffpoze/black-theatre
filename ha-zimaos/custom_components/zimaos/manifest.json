@@ -1,0 +1,1 @@
+{"domain":"zimaos","name":"ZimaOS","config_flow":true,"documentation":"https://github.com/jeffpoze/ha-zimaos","issue_tracker":"https://github.com/jeffpoze/ha-zimaos/issues","version":"0.1.0","requirements":["aiohttp>=3.10.0"],"iot_class":"local_polling"}
