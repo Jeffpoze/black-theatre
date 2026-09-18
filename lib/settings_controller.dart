@@ -124,6 +124,10 @@ class SettingsController extends ChangeNotifier {
   static const _defaultQualityKey = 'settings.defaultQuality';
   static const _omdbApiKeyKey = 'settings.omdbApiKey';
   static const _tmdbApiKeyKey = 'settings.tmdbApiKey';
+  static const _sonarrUrlKey = 'settings.sonarrUrl';
+  static const _sonarrApiKeyKey = 'settings.sonarrApiKey';
+  static const _radarrUrlKey = 'settings.radarrUrl';
+  static const _radarrApiKeyKey = 'settings.radarrApiKey';
 
   Color _accentColor = accentColorOptions.first.color;
   Color get accentColor => _accentColor;
@@ -150,6 +154,19 @@ class SettingsController extends ChangeNotifier {
   String _tmdbApiKey = '';
   String get tmdbApiKey => _tmdbApiKey;
 
+  // Each user's own Sonarr/Radarr instance — entered per-device in Settings,
+  // never bundled with the app. Powers the Calendar screen with real
+  // "unaired" schedule data that Jellyfin, a pure media server, has no
+  // concept of (it only knows about files that already exist).
+  String _sonarrUrl = '';
+  String get sonarrUrl => _sonarrUrl;
+  String _sonarrApiKey = '';
+  String get sonarrApiKey => _sonarrApiKey;
+  String _radarrUrl = '';
+  String get radarrUrl => _radarrUrl;
+  String _radarrApiKey = '';
+  String get radarrApiKey => _radarrApiKey;
+
   final Map<String, SortOption> _categorySort = {};
 
   SortOption sortFor(String categoryId) => _categorySort[categoryId] ?? SortOption.releaseNewest;
@@ -164,6 +181,10 @@ class SettingsController extends ChangeNotifier {
     if (storedQuality != null && defaultQualityOptions.contains(storedQuality)) _defaultQuality = storedQuality;
     _omdbApiKey = prefs.getString(_omdbApiKeyKey) ?? '';
     _tmdbApiKey = prefs.getString(_tmdbApiKeyKey) ?? '';
+    _sonarrUrl = prefs.getString(_sonarrUrlKey) ?? '';
+    _sonarrApiKey = prefs.getString(_sonarrApiKeyKey) ?? '';
+    _radarrUrl = prefs.getString(_radarrUrlKey) ?? '';
+    _radarrApiKey = prefs.getString(_radarrApiKeyKey) ?? '';
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(_categorySortPrefix)) continue;
       final id = key.substring(_categorySortPrefix.length);
@@ -207,6 +228,34 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tmdbApiKeyKey, key);
+  }
+
+  Future<void> setSonarrUrl(String url) async {
+    _sonarrUrl = url;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sonarrUrlKey, url);
+  }
+
+  Future<void> setSonarrApiKey(String key) async {
+    _sonarrApiKey = key;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_sonarrApiKeyKey, key);
+  }
+
+  Future<void> setRadarrUrl(String url) async {
+    _radarrUrl = url;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_radarrUrlKey, url);
+  }
+
+  Future<void> setRadarrApiKey(String key) async {
+    _radarrApiKey = key;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_radarrApiKeyKey, key);
   }
 
   Future<void> setSortFor(String categoryId, SortOption option) async {

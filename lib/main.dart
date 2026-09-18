@@ -507,6 +507,7 @@ class _HomePageState extends State<HomePage> {
           serverUrl: widget.session.serverUrl,
           userId: widget.session.userId,
           token: widget.session.token,
+          settings: widget.settings,
         ),
       ),
     );

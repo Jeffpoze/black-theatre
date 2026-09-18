@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'arr_service.dart';
 import 'main.dart';
 import 'services/jellyfin_api_service.dart';
 import 'settings_controller.dart';
@@ -19,6 +20,7 @@ class SettingsScreen extends StatelessWidget {
             _SettingsRow(title: 'Appearance', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AppearanceScreen(settings: settings)))),
             _SettingsRow(title: 'Playback', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlaybackScreen(settings: settings)))),
             _SettingsRow(title: 'Ratings & Logos', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => RatingsScreen(settings: settings)))),
+            _SettingsRow(title: 'Sonarr & Radarr', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => ArrSettingsScreen(settings: settings)))),
             _SettingsRow(title: 'About', onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen()))),
           ],
         ),
@@ -283,6 +285,147 @@ class _RatingsScreenState extends State<RatingsScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved')));
               },
               child: const Text('Save'),
+            ),
+          ],
+        ),
+      );
+}
+
+class ArrSettingsScreen extends StatefulWidget {
+  const ArrSettingsScreen({super.key, required this.settings});
+  final SettingsController settings;
+
+  @override
+  State<ArrSettingsScreen> createState() => _ArrSettingsScreenState();
+}
+
+class _ArrSettingsScreenState extends State<ArrSettingsScreen> {
+  late final _sonarrUrlController = TextEditingController(text: widget.settings.sonarrUrl);
+  late final _sonarrKeyController = TextEditingController(text: widget.settings.sonarrApiKey);
+  late final _radarrUrlController = TextEditingController(text: widget.settings.radarrUrl);
+  late final _radarrKeyController = TextEditingController(text: widget.settings.radarrApiKey);
+  bool _testingSonarr = false;
+  bool _testingRadarr = false;
+
+  @override
+  void dispose() {
+    _sonarrUrlController.dispose();
+    _sonarrKeyController.dispose();
+    _radarrUrlController.dispose();
+    _radarrKeyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _testAndSave({required bool isSonarr}) async {
+    final url = (isSonarr ? _sonarrUrlController : _radarrUrlController).text.trim();
+    final key = (isSonarr ? _sonarrKeyController : _radarrKeyController).text.trim();
+    setState(() => isSonarr ? _testingSonarr = true : _testingRadarr = true);
+    String message;
+    var succeeded = false;
+    try {
+      if (url.isEmpty || key.isEmpty) {
+        throw Exception('Enter both the server URL and API key.');
+      }
+      await ArrService.testConnection(url, key);
+      succeeded = true;
+      message = 'Connected — saved.';
+    } catch (e) {
+      message = 'Couldn\'t connect: ${e.toString().replaceFirst('Exception: ', '')}';
+    }
+    if (succeeded) {
+      if (isSonarr) {
+        await widget.settings.setSonarrUrl(url);
+        await widget.settings.setSonarrApiKey(key);
+      } else {
+        await widget.settings.setRadarrUrl(url);
+        await widget.settings.setRadarrApiKey(key);
+      }
+    }
+    if (!mounted) return;
+    setState(() => isSonarr ? _testingSonarr = false : _testingRadarr = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _clear({required bool isSonarr}) async {
+    if (isSonarr) {
+      _sonarrUrlController.clear();
+      _sonarrKeyController.clear();
+      await widget.settings.setSonarrUrl('');
+      await widget.settings.setSonarrApiKey('');
+    } else {
+      _radarrUrlController.clear();
+      _radarrKeyController.clear();
+      await widget.settings.setRadarrUrl('');
+      await widget.settings.setRadarrApiKey('');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: const Text('SONARR & RADARR', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 1.8))),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            const Text(
+              'Jellyfin only knows about episodes and movies it has already scanned as files. Connecting your own Sonarr and/or '
+              'Radarr instance lets the Calendar show the real release schedule, including upcoming items that haven\'t downloaded yet.',
+              style: TextStyle(color: Color(0xFFA5A7AC)),
+            ),
+            const SizedBox(height: 24),
+            const Text('Sonarr (TV)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sonarrUrlController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(labelText: 'Server URL', hintText: 'http://192.168.1.10:8989', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sonarrKeyController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'API Key', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                FilledButton(
+                  onPressed: _testingSonarr ? null : () => _testAndSave(isSonarr: true),
+                  child: _testingSonarr
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Test & Save'),
+                ),
+                const SizedBox(width: 12),
+                if (widget.settings.sonarrUrl.isNotEmpty)
+                  TextButton(onPressed: () => _clear(isSonarr: true), child: const Text('Remove')),
+              ],
+            ),
+            const SizedBox(height: 32),
+            const Text('Radarr (Movies)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _radarrUrlController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(labelText: 'Server URL', hintText: 'http://192.168.1.10:7878', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _radarrKeyController,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'API Key', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                FilledButton(
+                  onPressed: _testingRadarr ? null : () => _testAndSave(isSonarr: false),
+                  child: _testingRadarr
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Test & Save'),
+                ),
+                const SizedBox(width: 12),
+                if (widget.settings.radarrUrl.isNotEmpty)
+                  TextButton(onPressed: () => _clear(isSonarr: false), child: const Text('Remove')),
+              ],
             ),
           ],
         ),
